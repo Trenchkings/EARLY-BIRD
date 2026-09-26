@@ -25,9 +25,8 @@ export default function LaunchForm() {
   const [quoteAmount, setQuoteAmount] = useState("0");
   const [devBuyAmount, setDevBuyAmount] = useState("0");
   const [creatorTaxBps, setCreatorTaxBps] = useState<CreatorTaxBps>(100);
+  const [creatorFeeDonationEnabled, setCreatorFeeDonationEnabled] = useState(false);
   const [feeRecipient, setFeeRecipient] = useState("");
-  const [githubProfile, setGithubProfile] = useState("");
-  const [githubRepository, setGithubRepository] = useState("");
   const [website, setWebsite] = useState("");
   const [xUrl, setXUrl] = useState("");
   const [telegramUrl, setTelegramUrl] = useState("");
@@ -42,8 +41,8 @@ export default function LaunchForm() {
   }, [logoPreview]);
 
   useEffect(() => {
-    if (publicKey) setFeeRecipient(current => current || publicKey.toBase58());
-  }, [publicKey]);
+    if (creatorFeeDonationEnabled && publicKey) setFeeRecipient(current => current || publicKey.toBase58());
+  }, [creatorFeeDonationEnabled, publicKey]);
 
   function onLogoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -65,7 +64,7 @@ export default function LaunchForm() {
     const metadata: TokenMetadata = {
       name: name.trim(), symbol: symbol.trim().toUpperCase(), description: description.trim(), image: null,
       quoteAmount: quoteAmount.trim(), devBuyAmount: devBuyAmount.trim(), creatorTaxBps,
-      feeRecipient: feeRecipient.trim(), githubProfile: githubProfile.trim(), githubRepository: githubRepository.trim(),
+      creatorFeeDonationEnabled, feeRecipient: feeRecipient.trim(),
       website: website.trim(), xUrl: xUrl.trim(), telegramUrl: telegramUrl.trim()
     };
     const metadataError = validateTokenMetadata(metadata);
@@ -146,15 +145,16 @@ export default function LaunchForm() {
 
       <section className="form-section">
         <h3>Creator settings</h3>
-        <div className="row"><div><label className="label">Creator tax</label><select className="input" value={creatorTaxBps} onChange={e=>setCreatorTaxBps(Number(e.target.value) as CreatorTaxBps)}><option value={100}>1%</option><option value={200}>2%</option><option value={300}>3%</option></select></div><div><label className="label">Fee recipient wallet</label><input className="input" value={feeRecipient} onChange={e=>setFeeRecipient(e.target.value)} placeholder="Connected wallet" /></div></div>
-        <div className="fee-summary"><strong>Fee summary</strong><span>Creator tax: {creatorTaxBps / 100}% to the wallet above (not collected until trading enforces it).</span><span>EARLY BIRD platform fee: {CONFIG.platformFeeBps} bps (0.05%) to the configured development wallet (not editable, not collected by token creation).</span></div>
+        <div><label className="label">Creator tax</label><select className="input" value={creatorTaxBps} onChange={e=>setCreatorTaxBps(Number(e.target.value) as CreatorTaxBps)}><option value={100}>1%</option><option value={200}>2%</option><option value={300}>3%</option></select></div>
+        <label className="checkbox-label"><input type="checkbox" checked={creatorFeeDonationEnabled} onChange={e => setCreatorFeeDonationEnabled(e.target.checked)} /> Donate creator fees</label>
+        {creatorFeeDonationEnabled && <div style={{marginTop:14}}><label className="label">Creator fee recipient wallet</label><input className="input" value={feeRecipient} onChange={e=>setFeeRecipient(e.target.value)} placeholder="Connected wallet address" /><p className="small" style={{margin:"8px 0 0"}}>Defaults to your connected wallet. Enter only a Solana public address—never a private key, seed phrase, or secret key.</p><p className="small" style={{margin:"8px 0 0"}}>Creator fees will be directed to this wallet when creator-fee collection is enabled in the trading system.</p></div>}
+        <div className="fee-summary"><strong>Fee summary</strong><span>Creator tax: {creatorTaxBps / 100}% (configuration only; not collected by current Devnet token creation).</span><span>Creator-fee donation: {creatorFeeDonationEnabled ? "enabled for the recipient wallet above" : "disabled"}.</span><span>EARLY BIRD platform fee: {CONFIG.platformFeeBps} bps (0.05%) to the configured development wallet (not editable, not collected by token creation).</span></div>
       </section>
 
       <section className="form-section">
-        <h3>Optional links</h3><p className="small">Public metadata only. GitHub links do not require GitHub permissions or OAuth.</p>
-        <div className="row"><div><label className="label">GitHub profile</label><input className="input" value={githubProfile} onChange={e=>setGithubProfile(e.target.value)} placeholder="https://github.com/earlybird" /></div><div><label className="label">GitHub repository</label><input className="input" value={githubRepository} onChange={e=>setGithubRepository(e.target.value)} placeholder="https://github.com/org/repository" /></div></div>
-        <div className="row" style={{marginTop:14}}><div><label className="label">Website</label><input className="input" value={website} onChange={e=>setWebsite(e.target.value)} placeholder="https://example.com" /></div><div><label className="label">X / Twitter URL</label><input className="input" value={xUrl} onChange={e=>setXUrl(e.target.value)} placeholder="https://x.com/earlybird" /></div></div>
-        <div style={{marginTop:14}}><label className="label">Telegram URL</label><input className="input" value={telegramUrl} onChange={e=>setTelegramUrl(e.target.value)} placeholder="https://t.me/earlybird" /></div>
+        <h3>Optional links</h3><p className="small">Public token profile metadata. All links must use HTTPS.</p>
+        <div className="row"><div><label className="label">Telegram</label><input className="input" value={telegramUrl} onChange={e=>setTelegramUrl(e.target.value)} placeholder="https://t.me/earlybird" /></div><div><label className="label">X</label><input className="input" value={xUrl} onChange={e=>setXUrl(e.target.value)} placeholder="https://x.com/earlybird" /></div></div>
+        <div style={{marginTop:14}}><label className="label">Website</label><input className="input" value={website} onChange={e=>setWebsite(e.target.value)} placeholder="https://example.com" /></div>
       </section>
 
       <div style={{marginTop:14}}>
