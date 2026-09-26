@@ -11,15 +11,14 @@ export type TokenMetadata = {
   quoteAmount: string;
   devBuyAmount: string;
   creatorTaxBps: CreatorTaxBps;
+  creatorFeeDonationEnabled: boolean;
   feeRecipient: string;
-  githubProfile: string;
-  githubRepository: string;
   website: string;
   xUrl: string;
   telegramUrl: string;
 };
 
-export type TokenMetadataInput = TokenMetadata;
+export type TokenMetadataInput = TokenMetadata | Record<string, unknown>;
 
 export const TOKEN_METADATA_LIMITS = {
   nameBytes: 32,
@@ -57,7 +56,7 @@ export function validateTokenMetadata(metadata: TokenMetadataInput): string | nu
   if (!metadata || typeof metadata !== "object" ||
     typeof metadata.name !== "string" || typeof metadata.symbol !== "string" || typeof metadata.description !== "string" ||
     typeof metadata.quoteAmount !== "string" || typeof metadata.devBuyAmount !== "string" || typeof metadata.creatorTaxBps !== "number" ||
-    typeof metadata.feeRecipient !== "string" || typeof metadata.githubProfile !== "string" || typeof metadata.githubRepository !== "string" ||
+    typeof metadata.creatorFeeDonationEnabled !== "boolean" || typeof metadata.feeRecipient !== "string" ||
     typeof metadata.website !== "string" || typeof metadata.xUrl !== "string" || typeof metadata.telegramUrl !== "string") {
     return "Launch metadata has an invalid shape.";
   }
@@ -78,17 +77,13 @@ export function validateTokenMetadata(metadata: TokenMetadataInput): string | nu
   const devBuyError = validateSolAmount(metadata.devBuyAmount, "Dev buy amount");
   if (devBuyError) return devBuyError;
   if (!isCreatorTaxBps(metadata.creatorTaxBps)) return "Creator tax must be exactly 1%, 2%, or 3%.";
-  try {
-    new PublicKey(metadata.feeRecipient.trim());
-  } catch {
-    return "Fee recipient must be a valid Solana public key.";
+  if (metadata.creatorFeeDonationEnabled) {
+    try {
+      new PublicKey(metadata.feeRecipient.trim());
+    } catch {
+      return "Creator fee recipient wallet must be a valid Solana public key.";
+    }
   }
-  const githubProfileError = validateOptionalUrl(metadata.githubProfile, "GitHub profile", ["github.com", "www.github.com"]);
-  if (githubProfileError) return githubProfileError;
-  const githubRepositoryError = validateOptionalUrl(metadata.githubRepository, "GitHub repository", ["github.com", "www.github.com"]);
-  if (githubRepositoryError) return githubRepositoryError;
-  if (metadata.githubProfile.trim() && !/^https:\/\/(www\.)?github\.com\/[^/]+\/?$/.test(metadata.githubProfile.trim())) return "GitHub profile must point to a GitHub user or organization.";
-  if (metadata.githubRepository.trim() && !/^https:\/\/(www\.)?github\.com\/[^/]+\/[^/]+\/?$/.test(metadata.githubRepository.trim())) return "GitHub repository must point to a public GitHub repository URL.";
   const websiteError = validateOptionalUrl(metadata.website, "Website");
   if (websiteError) return websiteError;
   const xError = validateOptionalUrl(metadata.xUrl, "X/Twitter URL", ["x.com", "www.x.com", "twitter.com", "www.twitter.com"]);
