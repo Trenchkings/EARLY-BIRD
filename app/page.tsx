@@ -1,3 +1,5 @@
+"use client";
+
 import Image from "next/image";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import LaunchForm from "../components/LaunchForm";
@@ -34,7 +36,7 @@ export default function Home() {
         </section>
 
         <section className="grid" id="how">
-          <div className="card"><div className="small">01</div><h3>Connect</h3><p className="small">Use Phantom, Solflare or another Wallet Standard wallet on Solana.</p></div>
+          <div className="card"><div className="small">01</div><h3>Connect</h3><p className="small">Use Phantom, Solflare or another Solana wallet.</p></div>
           <div className="card"><div className="small">02</div><h3>Create</h3><p className="small">Set the name, ticker, description and intended quote asset.</p></div>
           <div className="card"><div className="small">03</div><h3>Launch</h3><p className="small">Devnet creates a real SPL mint. Mainnet will use the reviewed StonkFun launch adapter.</p></div>
         </section>
