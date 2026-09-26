@@ -1,6 +1,6 @@
 # EARLY BIRD — Solana launchpad MVP
 
-This is a devnet-first foundation for the EARLY BIRD launchpad.
+This is a Devnet SPL-token creator and a mainnet-only StonkFun / Raydium LaunchLab client.
 
 ## What works now
 
@@ -16,6 +16,9 @@ This is a devnet-first foundation for the EARLY BIRD launchpad.
 - Creator tax configuration selectable at 1%, 2%, or 3%.
 - Optional creator-fee donation configuration with a validated Solana public recipient wallet.
 - Optional public token profile links for Telegram, X, and Website.
+- Live StonkFun quote-pair discovery, search, and category filtering.
+- Server-side launch preparation/submission/status adapters with timeouts, response validation, and duplicate-request protection.
+- Connected-wallet signing of prepared transactions; no private key or seed phrase is requested or handled.
 
 ## Fees and public profile metadata
 
@@ -29,7 +32,9 @@ The public launch form supports optional HTTPS links for Telegram, X, and Websit
 
 StonkFun's current launch API is a mainnet launch flow. Devnet should not pretend to be StonkFun. This MVP therefore creates real devnet SPL tokens and keeps the StonkFun adapter separate.
 
-Current StonkFun documentation describes a flow where a creator supplies a quote mint, receives an unsigned payment transaction, signs it in their wallet, submits it, and receives the resulting mint. StonkFun launches use Raydium LaunchLab. The integration can be added as a mainnet-only adapter after endpoint permissions, fee behaviour and legal/compliance requirements are verified.
+The StonkFun path supplies the selected live quote mint, receives a prepared transaction, signs it in the connected wallet, submits the signed transaction through the server adapter, and polls until the provider returns the created mint. It is blocked unless `NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta`.
+
+The repository verifies the public pair-discovery URL, but does not contain verified URLs for the provider's prepare, submit, and status operations. Those URLs must therefore be supplied as `STONKFUN_PREPARE_URL`, `STONKFUN_SUBMIT_URL`, and `STONKFUN_STATUS_URL`; the application deliberately does not invent defaults. `STONKFUN_TIMEOUT_MS` optionally controls the server-side provider timeout (12 seconds by default). Keep these variables server-only.
 
 ## Install
 
@@ -48,11 +53,9 @@ Connect a wallet set to Solana Devnet and use the faucet to get test SOL.
 ## Next implementation stage
 
 1. Add a metadata upload service (Arweave/IPFS).
-2. Add a dynamic StonkFun pair discovery adapter.
-3. Add StonkFun launch quote -> wallet sign -> submit -> status polling.
-4. Add a proper on-chain trading and bonding-curve fee mechanism for creator tax and the 0.05% EARLY BIRD platform fee.
-5. Add persistent DB tables for launches, users, trades, fee events and audit logs.
-6. Add admin controls and analytics.
-7. Add mainnet safety checks and only then enable mainnet.
+2. Add a proper on-chain trading and bonding-curve fee mechanism for creator tax and the 0.05% EARLY BIRD platform fee after provider support is verified.
+3. Replace process-local duplicate-request tracking with persistent launch records for horizontally scaled deployments.
+4. Add persistent DB tables for launches, users, trades, fee events and audit logs.
+5. Add admin controls and analytics.
 
 Do not put a private key in `.env`. The admin wallet authenticates by signing a message.
