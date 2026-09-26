@@ -32,9 +32,23 @@ The public launch form supports optional HTTPS links for Telegram, X, and Websit
 
 StonkFun's current launch API is a mainnet launch flow. Devnet should not pretend to be StonkFun. This MVP therefore creates real devnet SPL tokens and keeps the StonkFun adapter separate.
 
-The StonkFun path supplies the selected live quote mint, receives a prepared transaction, signs it in the connected wallet, submits the signed transaction through the server adapter, and polls until the provider returns the created mint. It is blocked unless `NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta`.
+The StonkFun path supplies the selected live quote mint, receives a prepared transaction, validates that the connected creator is a required signer, shows it to the wallet for explicit approval, submits the signed transaction through the server adapter, and polls for at most two minutes until the provider returns the created mint. It is blocked unless `NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta`, and the configured `NEXT_PUBLIC_SOLANA_RPC` must report the Solana mainnet genesis hash. A wallet rejection never submits the transaction.
 
 The repository verifies the public pair-discovery URL, but does not contain verified URLs for the provider's prepare, submit, and status operations. Those URLs must therefore be supplied as `STONKFUN_PREPARE_URL`, `STONKFUN_SUBMIT_URL`, and `STONKFUN_STATUS_URL`; the application deliberately does not invent defaults. `STONKFUN_TIMEOUT_MS` optionally controls the server-side provider timeout (12 seconds by default). Keep these variables server-only.
+
+Provider prepare/submit/status response contracts remain limited to the fields implemented by the configured service: prepare must return `{ launchId, transaction }`, submit must return `{ signature }`, and status must return `{ state, signature?, mint? }`, where state is `pending`, `confirmed`, or `failed`. The provider endpoints are not publicly documented in this repository, so operators must verify these contracts with StonkFun before launch. In-memory idempotency prevents duplicate clicks in one application process, but it is not a substitute for a shared durable launch store in a multi-instance deployment.
+
+The current provider request includes the creator, selected quote mint, token name/symbol/description, developer-buy amount, and optional public links. The logo, quote-amount estimate, creator-tax selection, donation selection, and platform-fee configuration are **not** sent or enforced by this adapter because no verified provider capability for those fields is available. Do not present those configuration-only fields as on-chain launch behavior.
+
+## Controlled mainnet testing
+
+1. Obtain and independently verify the three HTTPS provider endpoints and a trusted mainnet RPC URL. Never place a seed phrase, private key, or secret key in environment variables or logs.
+2. Set `NEXT_PUBLIC_SOLANA_NETWORK=mainnet-beta`, `NEXT_PUBLIC_SOLANA_RPC`, `STONKFUN_PREPARE_URL`, `STONKFUN_SUBMIT_URL`, and `STONKFUN_STATUS_URL`, then build and start the application.
+3. First verify pair discovery and form validation with a wallet that holds no funds. Inspect the wallet simulation and every instruction before approving anything.
+4. For the controlled launch, use a deliberately funded wallet and a small, operator-approved amount. **A real mainnet launch spends real funds and may be irreversible.** The final transaction always requires explicit wallet approval.
+5. Retain the displayed signature and independently confirm both the transaction and created mint in Solana Explorer. A polling timeout does not prove that a submitted transaction failed; check the signature before retrying.
+
+No automated test in this repository performs or claims to perform a real mainnet launch.
 
 ## Install
 

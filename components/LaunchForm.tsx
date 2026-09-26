@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, SystemProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
 import {
@@ -11,7 +11,7 @@ import {
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID
 } from "@solana/spl-token";
-import { CONFIG } from "../lib/config";
+import { CONFIG, MAINNET_GENESIS_HASH } from "../lib/config";
 import { CreatorTaxBps, TokenMetadata, validateTokenLogo, validateTokenMetadata } from "../lib/token-metadata";
 import { estimateTokensReceived } from "../lib/launch-pricing";
 
@@ -42,6 +42,7 @@ export default function LaunchForm() {
   const [pairsBusy, setPairsBusy] = useState(CONFIG.network === "mainnet-beta");
   const [launchStatus, setLaunchStatus] = useState("");
   const [submittedSignature, setSubmittedSignature] = useState("");
+  const launchLock = useRef(false);
 
   useEffect(() => () => {
     if (logoPreview) URL.revokeObjectURL(logoPreview);
@@ -145,19 +146,23 @@ export default function LaunchForm() {
   }
 
   async function launchStonkFunToken() {
+    if (launchLock.current) return;
+    launchLock.current = true;
     setError(""); setResult(null); setLaunchStatus(""); setSubmittedSignature("");
-    if (!publicKey) return setError("Connect a Solana wallet first.");
-    if (!signTransaction) return setError("This wallet must support transaction signing.");
-    if (!quoteMint) return setError("Select a StonkFun quote pair.");
+    if (!publicKey) { launchLock.current = false; return setError("Connect a Solana wallet first."); }
+    if (!signTransaction) { launchLock.current = false; return setError("This wallet must support transaction signing."); }
+    if (!quoteMint || !pairs.some(pair => pair.mint === quoteMint)) { launchLock.current = false; return setError("Select a currently available StonkFun quote pair."); }
     const metadata: TokenMetadata = {
       name: name.trim(), symbol: symbol.trim().toUpperCase(), description: description.trim(), image: null,
       quoteAmount: quoteAmount.trim(), devBuyAmount: devBuyAmount.trim(), creatorTaxBps,
       creatorFeeDonationEnabled, feeRecipient: feeRecipient.trim(), website: website.trim(), xUrl: xUrl.trim(), telegramUrl: telegramUrl.trim()
     };
     const metadataError = validateTokenMetadata(metadata);
-    if (metadataError) return setError(metadataError);
+    if (metadataError) { launchLock.current = false; return setError(metadataError); }
     setBusy(true);
     try {
+      setLaunchStatus("Verifying Solana mainnet…");
+      if (await connection.getGenesisHash() !== MAINNET_GENESIS_HASH) throw new Error("Your configured RPC is not Solana mainnet. No launch was prepared.");
       const requestFingerprint = JSON.stringify({ creator: publicKey.toBase58(), quoteMint, metadata });
       const fingerprintBytes = new TextEncoder().encode(requestFingerprint);
       const requestHash = await crypto.subtle.digest("SHA-256", fingerprintBytes.buffer as ArrayBuffer);
@@ -180,9 +185,8 @@ export default function LaunchForm() {
       } catch {
         preparedTransaction = Transaction.from(bytes);
       }
-      const signed = preparedTransaction instanceof VersionedTransaction
-        ? await signTransaction(preparedTransaction)
-        : await signTransaction(preparedTransaction);
+      setLaunchStatus("Waiting for wallet signature…");
+      const signed = await signTransaction(preparedTransaction);
       const signedBytes = signed.serialize();
       setLaunchStatus("Submitting signed transaction…");
       const signedTransaction = btoa(Array.from(signedBytes, byte => String.fromCharCode(byte)).join(""));
@@ -193,17 +197,16 @@ export default function LaunchForm() {
       const submitted = await submitResponse.json() as { signature?: string; error?: string };
       if (!submitResponse.ok || !submitted.signature) throw new Error(submitted.error || "Unable to submit launch.");
       setSubmittedSignature(submitted.signature);
-      setLaunchStatus("Waiting for confirmation…");
-      const deadline = Date.now() + 120_000;
-      while (Date.now() < deadline) {
+      setLaunchStatus("Confirming transaction…");
+      for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 2_000));
-        const response = await fetch(`/api/stonkfun/status?launchId=${encodeURIComponent(prepared.launchId)}`);
+        const response = await fetch(`/api/stonkfun/status/${encodeURIComponent(prepared.launchId)}`);
         const status = await response.json() as { state?: string; signature?: string; mint?: string; error?: string };
         if (!response.ok) throw new Error(status.error || "Unable to check launch status.");
         if (status.state === "failed") throw new Error(status.error || "StonkFun launch failed.");
         if (status.state === "confirmed" && status.mint) {
           setResult({ mint: status.mint, sig: status.signature || submitted.signature });
-          setLaunchStatus("Launch confirmed.");
+          setLaunchStatus("Launch successful");
           return;
         }
       }
@@ -212,6 +215,7 @@ export default function LaunchForm() {
       setError(reason instanceof Error ? reason.message : "Launch failed.");
     } finally {
       setBusy(false);
+      launchLock.current = false;
     }
   }
 

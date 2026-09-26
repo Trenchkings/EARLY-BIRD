@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { getPairs, prepareLaunch, StonkFunError, StonkFunLaunchRequest, assertPublicKey } from "../../../../lib/stonkfun-adapter";
+import { getPairs, prepareLaunch, StonkFunError, StonkFunLaunchRequest, assertMainnetRpc, assertPublicKey } from "../../../../lib/stonkfun-adapter";
 import { validateTokenMetadata } from "../../../../lib/token-metadata";
-
-const preparations = new Map<string, Promise<{ launchId: string; transaction: string }>>();
+import { preparationRequests, rememberLaunch } from "../../../../lib/stonkfun-launch-store";
 
 export async function POST(request: Request) {
   try {
@@ -10,6 +9,8 @@ export async function POST(request: Request) {
     if (!body || typeof body.requestId !== "string" || !body.requestId || !body.launch) {
       throw new StonkFunError("A launch and request ID are required.", 400);
     }
+    if (!/^[a-f0-9]{64}$/.test(body.requestId)) throw new StonkFunError("Request ID is invalid.", 400);
+    await assertMainnetRpc();
     const publicKey = assertPublicKey(body.launch.publicKey, "Creator wallet");
     const quoteMint = assertPublicKey(body.launch.quoteMint, "Quote mint");
     const metadataError = validateTokenMetadata(body.metadata as Record<string, unknown>);
@@ -25,11 +26,11 @@ export async function POST(request: Request) {
       telegram: typeof body.launch.telegram === "string" ? body.launch.telegram : undefined
     };
     const key = `${publicKey}:${body.requestId}`;
-    const existing = preparations.get(key);
+    const existing = preparationRequests.get(key);
     if (existing) return NextResponse.json(await existing);
-    const result = prepareLaunch(launch);
-    preparations.set(key, result);
-    result.catch(() => preparations.delete(key));
+    const result = prepareLaunch(launch).then(prepared => { rememberLaunch(prepared, publicKey); return prepared; });
+    preparationRequests.set(key, result);
+    result.catch(() => preparationRequests.delete(key));
     return NextResponse.json(await result);
   } catch (error) {
     const status = error instanceof StonkFunError ? error.status : 502;
