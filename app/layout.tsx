@@ -3,7 +3,7 @@ import { WalletContext } from "../components/WalletContext";
 
 export const metadata = {
   title: "EARLY BIRD — Solana Launchpad",
-  description: "Launch tokens early. Devnet-first Solana launchpad."
+  description: "Launch tokens early with EARLY BIRD."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

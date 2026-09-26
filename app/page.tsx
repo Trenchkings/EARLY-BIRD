@@ -14,6 +14,7 @@ export default function Home() {
         </div>
         <div style={{display:"flex", gap:10, alignItems:"center"}}>
           <a className="btn btn-secondary" href="#launch">Launch</a>
+          <a className="btn btn-secondary" href="/docs">Docs</a>
           <a className="btn btn-secondary" href="/admin">Admin</a>
           <WalletMultiButton />
         </div>
@@ -22,11 +23,11 @@ export default function Home() {
       <div className="eb-container">
         <section className="hero">
           <div>
-            <span className="badge">Solana launchpad • devnet first</span>
+            <span className="badge">Solana token launchpad</span>
             <h1>Launch early.<br/><span style={{color:"#bfeaff"}}>Fly first.</span></h1>
-            <p>EARLY BIRD is being built as a StonkFun-compatible launch interface: launch tokens, choose quote assets, and eventually use the same StonkFun/Raydium LaunchLab ecosystem. The current build is deliberately safe on devnet.</p>
+            <p>EARLY BIRD is a focused interface for creating Solana tokens. Connect your wallet, add your token details, and launch when you are ready.</p>
             <div style={{display:"flex", gap:10, marginTop:24, flexWrap:"wrap"}}>
-              <a className="btn btn-primary" href="#launch">Create a devnet token</a>
+              <a className="btn btn-primary" href="#launch">Create a token</a>
               <a className="btn btn-secondary" href="#how">How it works</a>
             </div>
           </div>
@@ -37,17 +38,11 @@ export default function Home() {
 
         <section className="grid" id="how">
           <div className="card"><div className="small">01</div><h3>Connect</h3><p className="small">Use Phantom, Solflare or another Solana wallet.</p></div>
-          <div className="card"><div className="small">02</div><h3>Create</h3><p className="small">Set the name, ticker, description and intended quote asset.</p></div>
-          <div className="card"><div className="small">03</div><h3>Launch</h3><p className="small">Devnet creates a real SPL mint. Mainnet will use the reviewed StonkFun launch adapter.</p></div>
+          <div className="card"><div className="small">02</div><h3>Create</h3><p className="small">Set the name, ticker, description, and logo for your token.</p></div>
+          <div className="card"><div className="small">03</div><h3>Launch</h3><p className="small">Approve the token creation transaction from your connected wallet.</p></div>
         </section>
 
         <section id="launch" style={{marginTop:50}}><LaunchForm /></section>
-
-        <section className="grid" style={{marginTop:24}}>
-          <div className="card"><div className="small">PLATFORM FEE</div><div className="stat">0.05%</div><div className="small">5 basis points • target EARLY BIRD development fee</div></div>
-          <div className="card"><div className="small">ADMIN WALLET</div><div className="stat">Wallet</div><div className="small">Wallet-authenticated admin access; no private key stored by the site.</div></div>
-          <div className="card"><div className="small">NETWORK</div><div className="stat">DEVNET</div><div className="small">Free test SOL. Switch to mainnet only after the launch/trade flow is verified.</div></div>
-        </section>
       </div>
     </main>
   );
