@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
+import { Keypair, SystemProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
 import {
   createInitializeMintInstruction,
   createMintToInstruction,
@@ -17,7 +17,7 @@ import { estimateTokensReceived } from "../lib/launch-pricing";
 
 export default function LaunchForm() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction, connected, signMessage } = useWallet();
+  const { publicKey, sendTransaction, connected, signMessage, signTransaction } = useWallet();
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [decimals, setDecimals] = useState(9);
@@ -35,6 +35,13 @@ export default function LaunchForm() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{mint:string; sig:string}|null>(null);
   const [error, setError] = useState("");
+  const [pairs, setPairs] = useState<Array<{mint:string; symbol:string; name:string; category:string}>>([]);
+  const [quoteMint, setQuoteMint] = useState("");
+  const [pairSearch, setPairSearch] = useState("");
+  const [pairCategory, setPairCategory] = useState("All");
+  const [pairsBusy, setPairsBusy] = useState(CONFIG.network === "mainnet-beta");
+  const [launchStatus, setLaunchStatus] = useState("");
+  const [submittedSignature, setSubmittedSignature] = useState("");
 
   useEffect(() => () => {
     if (logoPreview) URL.revokeObjectURL(logoPreview);
@@ -43,6 +50,20 @@ export default function LaunchForm() {
   useEffect(() => {
     if (creatorFeeDonationEnabled && publicKey) setFeeRecipient(current => current || publicKey.toBase58());
   }, [creatorFeeDonationEnabled, publicKey]);
+
+  useEffect(() => {
+    if (CONFIG.network !== "mainnet-beta") return;
+    const controller = new AbortController();
+    fetch("/api/stonkfun/pairs", { signal: controller.signal })
+      .then(async response => {
+        const body = await response.json() as { pairs?: typeof pairs; error?: string };
+        if (!response.ok) throw new Error(body.error || "Unable to load StonkFun pairs.");
+        setPairs(body.pairs || []);
+      })
+      .catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); })
+      .finally(() => setPairsBusy(false));
+    return () => controller.abort();
+  }, []);
 
   function onLogoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -123,6 +144,85 @@ export default function LaunchForm() {
     } finally { setBusy(false); }
   }
 
+  async function launchStonkFunToken() {
+    setError(""); setResult(null); setLaunchStatus(""); setSubmittedSignature("");
+    if (!publicKey) return setError("Connect a Solana wallet first.");
+    if (!signTransaction) return setError("This wallet must support transaction signing.");
+    if (!quoteMint) return setError("Select a StonkFun quote pair.");
+    const metadata: TokenMetadata = {
+      name: name.trim(), symbol: symbol.trim().toUpperCase(), description: description.trim(), image: null,
+      quoteAmount: quoteAmount.trim(), devBuyAmount: devBuyAmount.trim(), creatorTaxBps,
+      creatorFeeDonationEnabled, feeRecipient: feeRecipient.trim(), website: website.trim(), xUrl: xUrl.trim(), telegramUrl: telegramUrl.trim()
+    };
+    const metadataError = validateTokenMetadata(metadata);
+    if (metadataError) return setError(metadataError);
+    setBusy(true);
+    try {
+      const requestFingerprint = JSON.stringify({ creator: publicKey.toBase58(), quoteMint, metadata });
+      const fingerprintBytes = new TextEncoder().encode(requestFingerprint);
+      const requestHash = await crypto.subtle.digest("SHA-256", fingerprintBytes.buffer as ArrayBuffer);
+      const requestId = Array.from(new Uint8Array(requestHash), byte => byte.toString(16).padStart(2, "0")).join("");
+      setLaunchStatus("Preparing launch…");
+      const preparedResponse = await fetch("/api/stonkfun/prepare", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestId, metadata, launch: {
+          publicKey: publicKey.toBase58(), quoteMint, name: metadata.name, symbol: metadata.symbol,
+          description: metadata.description, devBuyAmount: metadata.devBuyAmount,
+          website: metadata.website, twitter: metadata.xUrl, telegram: metadata.telegramUrl
+        } })
+      });
+      const prepared = await preparedResponse.json() as { launchId?: string; transaction?: string; error?: string };
+      if (!preparedResponse.ok || !prepared.launchId || !prepared.transaction) throw new Error(prepared.error || "Unable to prepare launch.");
+      const bytes = Uint8Array.from(atob(prepared.transaction), character => character.charCodeAt(0));
+      let preparedTransaction: Transaction | VersionedTransaction;
+      try {
+        preparedTransaction = VersionedTransaction.deserialize(bytes);
+      } catch {
+        preparedTransaction = Transaction.from(bytes);
+      }
+      const signed = preparedTransaction instanceof VersionedTransaction
+        ? await signTransaction(preparedTransaction)
+        : await signTransaction(preparedTransaction);
+      const signedBytes = signed.serialize();
+      setLaunchStatus("Submitting signed transaction…");
+      const signedTransaction = btoa(Array.from(signedBytes, byte => String.fromCharCode(byte)).join(""));
+      const submitResponse = await fetch("/api/stonkfun/submit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ launchId: prepared.launchId, transaction: signedTransaction })
+      });
+      const submitted = await submitResponse.json() as { signature?: string; error?: string };
+      if (!submitResponse.ok || !submitted.signature) throw new Error(submitted.error || "Unable to submit launch.");
+      setSubmittedSignature(submitted.signature);
+      setLaunchStatus("Waiting for confirmation…");
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 2_000));
+        const response = await fetch(`/api/stonkfun/status?launchId=${encodeURIComponent(prepared.launchId)}`);
+        const status = await response.json() as { state?: string; signature?: string; mint?: string; error?: string };
+        if (!response.ok) throw new Error(status.error || "Unable to check launch status.");
+        if (status.state === "failed") throw new Error(status.error || "StonkFun launch failed.");
+        if (status.state === "confirmed" && status.mint) {
+          setResult({ mint: status.mint, sig: status.signature || submitted.signature });
+          setLaunchStatus("Launch confirmed.");
+          return;
+        }
+      }
+      throw new Error("Launch confirmation timed out. Keep the transaction signature and check it in Solana Explorer.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Launch failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const categories = ["All", ...Array.from(new Set(pairs.map(pair => pair.category))).sort()];
+  const visiblePairs = pairs.filter(pair => {
+    const search = pairSearch.trim().toLowerCase();
+    return (pairCategory === "All" || pair.category === pairCategory) &&
+      (!search || `${pair.symbol} ${pair.name} ${pair.mint}`.toLowerCase().includes(search));
+  });
+  const isMainnet = CONFIG.network === "mainnet-beta";
+
   return (
     <div className="card launch-card">
       <div className="badge">TOKEN CREATION</div>
@@ -138,7 +238,15 @@ export default function LaunchForm() {
 
       <section className="form-section">
         <h3>Launch settings</h3>
-        <p className="small">These amounts are retained for the future bonding-curve launch flow. They do not execute a buy or establish a token price today.</p>
+        <p className="small">{isMainnet ? "Choose a live StonkFun / Raydium LaunchLab quote pair." : "These amounts are retained for the future bonding-curve launch flow. They do not execute a buy or establish a token price today."}</p>
+        {isMainnet && <div className="pair-selector">
+          <div className="row"><div><label className="label">Search pairs</label><input className="input" value={pairSearch} onChange={event=>setPairSearch(event.target.value)} placeholder="Symbol, name, or mint" /></div><div><label className="label">Category</label><select className="input" value={pairCategory} onChange={event=>setPairCategory(event.target.value)}>{categories.map(category=><option key={category}>{category}</option>)}</select></div></div>
+          <label className="label" style={{marginTop:14}}>Quote pair</label>
+          <select className="input" value={quoteMint} onChange={event=>setQuoteMint(event.target.value)} disabled={pairsBusy}>
+            <option value="">{pairsBusy ? "Loading live pairs…" : "Select a quote pair"}</option>
+            {visiblePairs.map(pair=><option key={pair.mint} value={pair.mint}>{pair.symbol} — {pair.name} ({pair.category})</option>)}
+          </select>
+        </div>}
         <div className="row"><div><label className="label">Quote amount (SOL)</label><input className="input" inputMode="decimal" value={quoteAmount} onChange={e=>setQuoteAmount(e.target.value)} /></div><div><label className="label">Dev buy amount (SOL)</label><input className="input" inputMode="decimal" value={devBuyAmount} onChange={e=>setDevBuyAmount(e.target.value)} /></div></div>
         <div className="notice" style={{marginTop:14}}><strong>Estimated tokens received: {estimateTokensReceived({ quoteAmount, devBuyAmount }).estimatedTokens ?? "Not yet available"}.</strong><br/>A real bonding-curve pricing mechanism has not been implemented, so this is not an executable quote or a token-price estimate.</div>
       </section>
@@ -165,16 +273,18 @@ export default function LaunchForm() {
         </div>
       </div>
 
-      <button className="btn btn-primary" style={{width:"100%", marginTop:18}} onClick={launchDevnetToken} disabled={!connected || busy}>
-        {busy ? "Creating token…" : connected ? "CREATE TOKEN" : "CONNECT WALLET"}
+      <button className="btn btn-primary" style={{width:"100%", marginTop:18}} onClick={isMainnet ? launchStonkFunToken : launchDevnetToken} disabled={!connected || busy || (isMainnet && (!quoteMint || pairsBusy))}>
+        {busy ? (launchStatus || "Creating token…") : connected ? (isMainnet ? "LAUNCH WITH STONKFUN" : "CREATE TOKEN") : "CONNECT WALLET"}
       </button>
 
       {error && <div className="error" style={{marginTop:14}}>{error}</div>}
+      {submittedSignature && !result && <div className="notice" style={{marginTop:14}}><strong>Transaction submitted.</strong><div className="small">Signature: {submittedSignature}</div><a className="small" href={`https://explorer.solana.com/tx/${submittedSignature}`} target="_blank" rel="noreferrer">View transaction →</a></div>}
       {result && <div className="success" style={{marginTop:14}}>
         <div><strong>Token created.</strong></div>
         <div className="small" style={{marginTop:6}}>Mint: {result.mint}</div>
-        <a className="small" href={`https://explorer.solana.com/address/${result.mint}?cluster=devnet`} target="_blank">View mint on Solana Explorer →</a>
-        <div><a className="small" href={`https://explorer.solana.com/tx/${result.sig}?cluster=devnet`} target="_blank">View transaction →</a></div>
+        <div className="small" style={{marginTop:6}}>Transaction: {result.sig}</div>
+        <a className="small" href={`https://explorer.solana.com/address/${result.mint}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View mint on Solana Explorer →</a>
+        <div><a className="small" href={`https://explorer.solana.com/tx/${result.sig}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View transaction →</a></div>
       </div>}
     </div>
   );
