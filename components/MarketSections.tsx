@@ -1,0 +1,495 @@
+﻿"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+
+type Pool = {
+  pool?: string;
+  mint?: string;
+  name?: string;
+  symbol?: string;
+  imageUrl?: string;
+  quoteSymbol?: string;
+  quoteName?: string;
+  quoteLogoUrl?: string;
+  marketCapUsd?: number;
+  volume24hUsd?: number;
+  liquidityUsd?: number;
+  priceUsd?: number;
+  priceChange24h?: number;
+  graduationProgress?: number;
+  status?: string;
+  createdAt?: string;
+};
+
+type MarketResponse = {
+  pools?: Pool[];
+  featured?: Pool;
+  graduationMarketCapUsd?: number;
+};
+
+function money(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+
+  if (value >= 1_000_000_000)
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+
+  if (value >= 1_000_000)
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+
+  if (value >= 1_000)
+    return `$${(value / 1_000).toFixed(2)}K`;
+
+  return `$${value.toFixed(2)}`;
+}
+
+function price(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+
+  if (value >= 1) return `$${value.toFixed(4)}`;
+  if (value >= 0.01) return `$${value.toFixed(6)}`;
+
+  return `$${value.toPrecision(5)}`;
+}
+
+function absoluteImage(url?: string) {
+  if (!url) return null;
+
+  if (url.startsWith("/")) {
+    return `https://www.stonkfun.xyz${url}`;
+  }
+
+  return url;
+}
+
+function TokenCard({ token }: { token: Pool }) {
+  const progress = Math.max(
+    0,
+    Math.min(100, (token.graduationProgress ?? 0) * 100)
+  );
+
+  const image = absoluteImage(token.imageUrl);
+  const quoteImage = absoluteImage(token.quoteLogoUrl);
+
+  return (
+    <Link
+      href={`/token/${token.mint}`}
+      style={{
+        color: "inherit",
+        textDecoration: "none",
+        minWidth: 0
+      }}
+    >
+      <article
+        className="card"
+        style={{
+          padding: 18,
+          height: "100%",
+          transition: "transform .15s ease, border-color .15s ease",
+          cursor: "pointer"
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}
+        >
+          {image ? (
+            <img
+              src={image}
+              alt={token.symbol || "Token"}
+              width={52}
+              height={52}
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 14,
+                objectFit: "cover",
+                flexShrink: 0
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 14,
+                display: "grid",
+                placeItems: "center",
+                background: "rgba(255,255,255,.08)",
+                fontWeight: 800,
+                flexShrink: 0
+              }}
+            >
+              {(token.symbol || "?").slice(0, 2)}
+            </div>
+          )}
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontWeight: 800,
+                fontSize: 17,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap"
+              }}
+            >
+              {token.name || token.symbol || "Unknown token"}
+            </div>
+
+            <div className="small">
+              ${token.symbol || "—"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6
+            }}
+          >
+            {quoteImage && (
+              <img
+                src={quoteImage}
+                alt=""
+                width={22}
+                height={22}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  objectFit: "cover"
+                }}
+              />
+            )}
+
+            <span className="small">
+              / {token.quoteSymbol || "PAIR"}
+            </span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 10,
+            marginTop: 18
+          }}
+        >
+          <div>
+            <div className="small">MARKET CAP</div>
+            <strong>{money(token.marketCapUsd)}</strong>
+          </div>
+
+          <div>
+            <div className="small">24H VOLUME</div>
+            <strong>{money(token.volume24hUsd)}</strong>
+          </div>
+
+          <div>
+            <div className="small">PRICE</div>
+            <strong>{price(token.priceUsd)}</strong>
+          </div>
+
+          <div>
+            <div className="small">STATUS</div>
+            <strong>
+              {token.status === "graduated"
+                ? "Graduated"
+                : `${progress.toFixed(1)}%`}
+            </strong>
+          </div>
+        </div>
+
+        {token.status !== "graduated" && (
+          <div style={{ marginTop: 16 }}>
+            <div
+              style={{
+                height: 7,
+                borderRadius: 999,
+                background: "rgba(255,255,255,.08)",
+                overflow: "hidden"
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${progress}%`,
+                  borderRadius: 999,
+                  background:
+                    "linear-gradient(90deg,#36b9ff,#bfeaff)"
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </article>
+    </Link>
+  );
+}
+
+function MarketSection({
+  title,
+  subtitle,
+  tokens
+}: {
+  title: string;
+  subtitle: string;
+  tokens: Pool[];
+}) {
+  return (
+    <section style={{ marginTop: 42 }}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ marginBottom: 4 }}>{title}</h2>
+        <p className="small" style={{ margin: 0 }}>
+          {subtitle}
+        </p>
+      </div>
+
+      {tokens.length ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 14
+          }}
+        >
+          {tokens.map((token, index) => (
+            <TokenCard
+              key={`${token.mint}-${token.pool}-${index}`}
+              token={token}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="card">
+          <p className="small" style={{ margin: 0 }}>
+            No tokens available in this section yet.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export default function MarketSections() {
+  const [pools, setPools] = useState<Pool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [activeMarket, setActiveMarket] = useState<
+    "trending" | "newest" | "aboutToGraduate" | "graduated"
+  >("trending");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setError("");
+
+        const response = await fetch(
+          "/api/stonkfun/market?sort=newest&page=1&pageSize=100",
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Market API returned ${response.status}`);
+        }
+
+        const body: MarketResponse = await response.json();
+
+        if (!cancelled) {
+          setPools(Array.isArray(body.pools) ? body.pools : []);
+        }
+      } catch (reason) {
+        if (!cancelled) {
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Unable to load market."
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+
+    const timer = window.setInterval(load, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const sections = useMemo(() => {
+    const usable = pools.filter(token => token.mint);
+
+    const newest = [...usable]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt || 0).getTime() -
+          new Date(a.createdAt || 0).getTime()
+      )
+      .slice(0, 8);
+
+    const trending = [...usable]
+      .filter(token => (token.volume24hUsd ?? 0) > 0)
+      .sort(
+        (a, b) =>
+          (b.volume24hUsd ?? 0) - (a.volume24hUsd ?? 0)
+      )
+      .slice(0, 8);
+
+    const aboutToGraduate = [...usable]
+      .filter(
+        token =>
+          token.status !== "graduated" &&
+          (token.graduationProgress ?? 0) > 0
+      )
+      .sort(
+        (a, b) =>
+          (b.graduationProgress ?? 0) -
+          (a.graduationProgress ?? 0)
+      )
+      .slice(0, 8);
+
+    const graduated = [...usable]
+      .filter(token => token.status === "graduated")
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt || 0).getTime() -
+          new Date(a.createdAt || 0).getTime()
+      )
+      .slice(0, 8);
+
+    return {
+      newest,
+      trending,
+      aboutToGraduate,
+      graduated
+    };
+  }, [pools]);
+
+  if (loading) {
+    return (
+      <section style={{ marginTop: 50 }}>
+        <div className="card">
+          <p style={{ margin: 0 }}>Loading live market...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section style={{ marginTop: 50 }}>
+        <div className="card">
+          <strong>Market temporarily unavailable</strong>
+          <p className="small">{error}</p>
+        </div>
+      </section>
+    );
+  }
+
+  const marketTabs = [
+    {
+      key: "trending" as const,
+      label: "🔥 Trending",
+      title: "🔥 TRENDING",
+      subtitle: "Tokens with the strongest 24-hour trading volume.",
+      tokens: sections.trending
+    },
+    {
+      key: "newest" as const,
+      label: "🆕 New",
+      title: "🆕 NEW",
+      subtitle: "The latest tokens appearing on StonkFun.",
+      tokens: sections.newest
+    },
+    {
+      key: "aboutToGraduate" as const,
+      label: "🚀 Graduating",
+      title: "🚀 ABOUT TO GRADUATE",
+      subtitle: "Tokens furthest along their graduation curve.",
+      tokens: sections.aboutToGraduate
+    },
+    {
+      key: "graduated" as const,
+      label: "🎓 Graduated",
+      title: "🎓 GRADUATED",
+      subtitle: "Tokens that have completed graduation.",
+      tokens: sections.graduated
+    }
+  ];
+
+  const selectedMarket =
+    marketTabs.find(tab => tab.key === activeMarket) ??
+    marketTabs[0];
+
+  return (
+    <div id="markets" style={{ marginTop: 64 }}>
+      <div style={{ marginBottom: 22 }}>
+        <span className="badge">LIVE MARKET</span>
+
+        <h2
+          style={{
+            marginTop: 12,
+            marginBottom: 6,
+            fontSize: 32
+          }}
+        >
+          Explore MIDCURVE
+        </h2>
+
+        <p className="small" style={{ margin: 0 }}>
+          Discover new launches, follow market activity and find tokens
+          moving along the curve.
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+          marginBottom: 8
+        }}
+      >
+        {marketTabs.map(tab => {
+          const active = activeMarket === tab.key;
+
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveMarket(tab.key)}
+              className={active ? "btn btn-primary" : "btn btn-secondary"}
+              style={{
+                cursor: "pointer",
+                flex: "0 0 auto"
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <MarketSection
+        title={selectedMarket.title}
+        subtitle={selectedMarket.subtitle}
+        tokens={selectedMarket.tokens}
+      />
+    </div>
+  );
+}
+
