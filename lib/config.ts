@@ -6,5 +6,7 @@ export const CONFIG = {
   launchMode: (process.env.NEXT_PUBLIC_SOLANA_NETWORK || "devnet") === "mainnet-beta" ? "stonkfun" : "devnet-token-only"
 };
 
+export const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+
 export const feeForLamports = (lamports: number) =>
   Math.floor(lamports * CONFIG.platformFeeBps / 10_000);

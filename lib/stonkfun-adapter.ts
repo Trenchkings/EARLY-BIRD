@@ -10,6 +10,8 @@ export type StonkFunPair = {
   category: string;
 };
 
+export type StonkFunPairRegistryEntry = Record<string, unknown> & { mint: string };
+
 export type StonkFunLaunchRequest = {
   publicKey: string;
   quoteMint: string;
@@ -111,6 +113,26 @@ export async function getPairs(): Promise<StonkFunPair[]> {
       return [];
     }
   });
+}
+
+/** Returns the provider's registry row without treating any of its claims as trusted. */
+export async function getPairRegistryEntry(quoteMint: string): Promise<StonkFunPairRegistryEntry | null> {
+  const payload = await providerFetch(PAIRS_URL);
+  const body = record(payload);
+  const rows = Array.isArray(payload) ? payload : Array.isArray(body?.data) ? body.data : Array.isArray(body?.pairs) ? body.pairs : [];
+
+  for (const value of rows) {
+    const pair = record(value);
+    if (!pair || pair.launchable === false || pair.launchLabReady === false) continue;
+    try {
+      if (assertPublicKey(pair.mint, "Quote mint") === quoteMint) {
+        return { ...pair, mint: quoteMint };
+      }
+    } catch {
+      // Malformed registry rows are never eligible.
+    }
+  }
+  return null;
 }
 
 export async function prepareLaunch(request: StonkFunLaunchRequest): Promise<PreparedLaunch> {
