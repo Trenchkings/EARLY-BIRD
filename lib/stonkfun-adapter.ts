@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+﻿import { PublicKey } from "@solana/web3.js";
 
 const PAIRS_URL = "https://www.stonkfun.xyz/api/public/v1/pairs";
 const DEFAULT_TIMEOUT_MS = 12_000;
@@ -93,10 +93,37 @@ function providerUrl(name: "STONKFUN_PREPARE_URL" | "STONKFUN_SUBMIT_URL" | "STO
   return url;
 }
 
+function pairRows(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const body = record(payload);
+
+  if (!body) {
+    return [];
+  }
+
+  if (Array.isArray(body.pairs)) {
+    return body.pairs;
+  }
+
+  const data = record(body.data);
+
+  if (data && Array.isArray(data.pairs)) {
+    return data.pairs;
+  }
+
+  if (Array.isArray(body.data)) {
+    return body.data;
+  }
+
+  return [];
+}
 export async function getPairs(): Promise<StonkFunPair[]> {
   const payload = await providerFetch(PAIRS_URL);
   const body = record(payload);
-  const rows = Array.isArray(payload) ? payload : Array.isArray(body?.data) ? body.data : Array.isArray(body?.pairs) ? body.pairs : [];
+  const rows = pairRows(payload);
   return rows.flatMap((value): StonkFunPair[] => {
     const pair = record(value);
     if (!pair || pair.launchable === false || pair.launchLabReady === false) return [];
@@ -119,7 +146,7 @@ export async function getPairs(): Promise<StonkFunPair[]> {
 export async function getPairRegistryEntry(quoteMint: string): Promise<StonkFunPairRegistryEntry | null> {
   const payload = await providerFetch(PAIRS_URL);
   const body = record(payload);
-  const rows = Array.isArray(payload) ? payload : Array.isArray(body?.data) ? body.data : Array.isArray(body?.pairs) ? body.pairs : [];
+  const rows = pairRows(payload);
 
   for (const value of rows) {
     const pair = record(value);
@@ -171,3 +198,4 @@ export async function getLaunchStatus(launchId: string): Promise<LaunchStatus> {
     error: typeof data.error === "string" ? data.error : undefined
   };
 }
+
