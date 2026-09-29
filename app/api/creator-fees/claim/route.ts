@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   Connection,
   PublicKey,
@@ -18,11 +18,9 @@ import {
   getPdaCreatorVault
 } from "@raydium-io/raydium-sdk-v2";
 import { CONFIG } from "../../../../lib/config";
+import { getCreatorFeeRedirect } from "../../../../lib/creator-fee-redirects";
 
-function parsePublicKey(
-  value: unknown,
-  label: string
-): PublicKey {
+function parsePublicKey(value: unknown, label: string): PublicKey {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`${label} is required.`);
   }
@@ -38,10 +36,7 @@ export async function POST(request: Request) {
   try {
     if (CONFIG.network !== "mainnet-beta") {
       return NextResponse.json(
-        {
-          error:
-            "Creator fee claiming is available on mainnet only."
-        },
+        { error: "Creator fee claiming is available on mainnet only." },
         { status: 400 }
       );
     }
@@ -49,58 +44,47 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body !== "object") {
+      return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+    }
+
+    const creator = parsePublicKey(body.creator, "Creator wallet");
+    const tokenMint = parsePublicKey(body.tokenMint, "Token mint");
+
+    // The persisted launch redirect is the source of truth. Do not trust a
+    // recipient supplied by the client when preparing a fee claim.
+    const redirect = await getCreatorFeeRedirect(
+      creator.toBase58(),
+      tokenMint.toBase58()
+    );
+
+    if (!redirect) {
       return NextResponse.json(
-        { error: "Invalid request." },
-        { status: 400 }
+        { error: "No fee recipient is registered for this launch." },
+        { status: 404 }
       );
     }
 
-    const creator = parsePublicKey(
-      body.creator,
-      "Creator wallet"
-    );
+    const recipient = parsePublicKey(redirect.recipient, "Stored recipient wallet");
 
-    const recipient = parsePublicKey(
-      body.recipient,
-      "Recipient wallet"
-    );
-
-    /*
-     * Standard SOL LaunchLab launches use WSOL as mint B.
-     */
+    // Standard SOL LaunchLab launches use WSOL as mint B.
     const mintB = NATIVE_MINT;
     const mintProgramB = TOKEN_PROGRAM_ID;
 
     const creatorClaimFeeAuth =
-      getPdaCreatorFeeVaultAuth(
-        LAUNCHPAD_PROGRAM
-      ).publicKey;
+      getPdaCreatorFeeVaultAuth(LAUNCHPAD_PROGRAM).publicKey;
 
     const creatorClaimFeeVault =
-      getPdaCreatorVault(
-        LAUNCHPAD_PROGRAM,
-        creator,
-        mintB
-      ).publicKey;
+      getPdaCreatorVault(LAUNCHPAD_PROGRAM, creator, mintB).publicKey;
 
-    /*
-     * The destination belongs to the nominated recipient,
-     * NOT the creator.
-     */
-    const recipientTokenAccount =
-      getAssociatedTokenAddressSync(
-        mintB,
-        recipient,
-        false,
-        mintProgramB,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      );
-
-    const connection = new Connection(
-      CONFIG.rpc,
-      "confirmed"
+    const recipientTokenAccount = getAssociatedTokenAddressSync(
+      mintB,
+      recipient,
+      false,
+      mintProgramB,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     );
 
+    const connection = new Connection(CONFIG.rpc, "confirmed");
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash("confirmed");
 
@@ -110,10 +94,6 @@ export async function POST(request: Request) {
       lastValidBlockHeight
     });
 
-    /*
-     * Safely creates the recipient WSOL ATA when missing.
-     * The creator pays the ATA rent if creation is needed.
-     */
     transaction.add(
       createAssociatedTokenAccountIdempotentInstruction(
         creator,
@@ -125,10 +105,6 @@ export async function POST(request: Request) {
       )
     );
 
-    /*
-     * Raydium requires creator to sign, but allows the
-     * recipient token account to be supplied independently.
-     */
     transaction.add(
       claimCreatorFee(
         LAUNCHPAD_PROGRAM,
@@ -148,28 +124,17 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       transaction: serialized.toString("base64"),
-
       creator: creator.toBase58(),
-
+      tokenMint: tokenMint.toBase58(),
       recipient: recipient.toBase58(),
-
-      recipientTokenAccount:
-        recipientTokenAccount.toBase58(),
-
-      creatorFeeVault:
-        creatorClaimFeeVault.toBase58(),
-
+      recipientTokenAccount: recipientTokenAccount.toBase58(),
+      creatorFeeVault: creatorClaimFeeVault.toBase58(),
       mintB: mintB.toBase58(),
-
       blockhash,
-
       lastValidBlockHeight
     });
   } catch (error) {
-    console.error(
-      "MIDCURVE CREATOR FEE CLAIM ERROR:",
-      error
-    );
+    console.error("MIDCURVE CREATOR FEE CLAIM ERROR:", error);
 
     return NextResponse.json(
       {
