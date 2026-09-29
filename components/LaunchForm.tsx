@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { ChangeEvent, useEffect, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -16,8 +16,16 @@ import { CreatorTaxBps, TokenMetadata, validateTokenLogo, validateTokenMetadata 
 import { estimateTokensReceived } from "../lib/launch-pricing";
 
 export default function LaunchForm() {
+  const [redirectFees, setRedirectFees] = useState(false);
   const { connection } = useConnection();
-  const { publicKey, sendTransaction, connected, signMessage, signTransaction } = useWallet();
+  const {
+    publicKey,
+    sendTransaction,
+    connected,
+    signMessage,
+    signTransaction,
+    signAllTransactions
+  } = useWallet();
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [decimals, setDecimals] = useState(9);
@@ -25,6 +33,7 @@ export default function LaunchForm() {
   const [quoteAmount, setQuoteAmount] = useState("0");
   const [devBuyAmount, setDevBuyAmount] = useState("0");
   const [creatorTaxBps, setCreatorTaxBps] = useState<CreatorTaxBps>(100);
+  const [rewardTaxBps, setRewardTaxBps] = useState<100 | 300>(100);
   const [creatorFeeDonationEnabled, setCreatorFeeDonationEnabled] = useState(false);
   const [feeRecipient, setFeeRecipient] = useState("");
   const [website, setWebsite] = useState("");
@@ -35,13 +44,16 @@ export default function LaunchForm() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{mint:string; sig:string}|null>(null);
   const [error, setError] = useState("");
-  const [pairs, setPairs] = useState<Array<{mint:string; symbol:string; name:string; category:string}>>([]);
+  const [pairs, setPairs] = useState<Array<{mint:string; symbol:string; name:string; category:string; logoUrl?:string}>>([]);
   const [quoteMint, setQuoteMint] = useState("");
   const [pairSearch, setPairSearch] = useState("");
-  const [pairCategory, setPairCategory] = useState("All");
-  const [pairsBusy, setPairsBusy] = useState(CONFIG.network === "mainnet-beta");
+  const [launchMode, setLaunchMode] = useState<"standard" | "rewards">("standard");
+  const [pairsBusy, setPairsBusy] = useState(true);
   const [launchStatus, setLaunchStatus] = useState("");
   const [submittedSignature, setSubmittedSignature] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimStatus, setClaimStatus] = useState("");
+  const [claimSignature, setClaimSignature] = useState("");
 
   useEffect(() => () => {
     if (logoPreview) URL.revokeObjectURL(logoPreview);
@@ -52,7 +64,6 @@ export default function LaunchForm() {
   }, [creatorFeeDonationEnabled, publicKey]);
 
   useEffect(() => {
-    if (CONFIG.network !== "mainnet-beta") return;
     const controller = new AbortController();
     fetch("/api/stonkfun/pairs", { signal: controller.signal })
       .then(async response => {
@@ -99,7 +110,7 @@ export default function LaunchForm() {
 
     setBusy(true);
     try {
-      const authorizationMessage = `EARLY BIRD launch configuration\nCreator: ${publicKey.toBase58()}\nConfiguration: ${JSON.stringify(metadata)}`;
+      const authorizationMessage = `MIDCURVE launch configuration\nCreator: ${publicKey.toBase58()}\nConfiguration: ${JSON.stringify(metadata)}`;
       const configurationSignature = await signMessage(new TextEncoder().encode(authorizationMessage));
       const signatureBase64 = btoa(String.fromCharCode(...configurationSignature));
       // Devnet-only functional token creation. StonkFun itself is mainnet infrastructure;
@@ -148,7 +159,7 @@ export default function LaunchForm() {
     setError(""); setResult(null); setLaunchStatus(""); setSubmittedSignature("");
     if (!publicKey) return setError("Connect a Solana wallet first.");
     if (!signTransaction) return setError("This wallet must support transaction signing.");
-    if (!quoteMint) return setError("Select a StonkFun quote pair.");
+    if (launchMode === "rewards" && !quoteMint) return setError("Select a StonkFun quote pair.");
     const metadata: TokenMetadata = {
       name: name.trim(), symbol: symbol.trim().toUpperCase(), description: description.trim(), image: null,
       quoteAmount: quoteAmount.trim(), devBuyAmount: devBuyAmount.trim(), creatorTaxBps,
@@ -156,54 +167,203 @@ export default function LaunchForm() {
     };
     const metadataError = validateTokenMetadata(metadata);
     if (metadataError) return setError(metadataError);
+    if (!logo) return setError("A token logo is required.");
+
+    const logoError = validateTokenLogo(logo);
+    if (logoError) return setError(logoError);
+
     setBusy(true);
     try {
-      const requestFingerprint = JSON.stringify({ creator: publicKey.toBase58(), quoteMint, metadata });
+      const logoDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Unable to read token logo."));
+        reader.onerror = () => reject(new Error("Unable to read token logo."));
+        reader.readAsDataURL(logo);
+      });
+
+      const requestFingerprint = JSON.stringify({ creator: publicKey.toBase58(), quoteMint, metadata, logo: logoDataUrl });
       const fingerprintBytes = new TextEncoder().encode(requestFingerprint);
       const requestHash = await crypto.subtle.digest("SHA-256", fingerprintBytes.buffer as ArrayBuffer);
       const requestId = Array.from(new Uint8Array(requestHash), byte => byte.toString(16).padStart(2, "0")).join("");
-      setLaunchStatus("Preparing launch…");
+      setLaunchStatus("Preparing launchâ€¦");
       const preparedResponse = await fetch("/api/stonkfun/prepare", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ requestId, metadata, launch: {
           publicKey: publicKey.toBase58(), quoteMint, name: metadata.name, symbol: metadata.symbol,
-          description: metadata.description, devBuyAmount: metadata.devBuyAmount,
+          description: metadata.description, devBuyAmount: metadata.devBuyAmount, creatorTaxBps: metadata.creatorTaxBps,
+          ...(launchMode === "rewards"
+            ? {
+                mode: "reward" as const,
+                rewardTaxBps
+              }
+            : {}),
+          logo: logoDataUrl,
           website: metadata.website, twitter: metadata.xUrl, telegram: metadata.telegramUrl
         } })
       });
-      const prepared = await preparedResponse.json() as { launchId?: string; transaction?: string; error?: string };
-      if (!preparedResponse.ok || !prepared.launchId || !prepared.transaction) throw new Error(prepared.error || "Unable to prepare launch.");
-      const bytes = Uint8Array.from(atob(prepared.transaction), character => character.charCodeAt(0));
-      let preparedTransaction: Transaction | VersionedTransaction;
-      try {
-        preparedTransaction = VersionedTransaction.deserialize(bytes);
-      } catch {
-        preparedTransaction = Transaction.from(bytes);
+      const prepared = await preparedResponse.json() as {
+        launchId?: string;
+        transaction?: string;
+        fundingTransaction?: string;
+        error?: string;
+      };
+
+      if (!preparedResponse.ok || !prepared.launchId || !prepared.transaction) {
+        throw new Error(prepared.error || "Unable to prepare launch.");
       }
-      const signed = preparedTransaction instanceof VersionedTransaction
-        ? await signTransaction(preparedTransaction)
-        : await signTransaction(preparedTransaction);
-      const signedBytes = signed.serialize();
-      setLaunchStatus("Submitting signed transaction…");
-      const signedTransaction = btoa(Array.from(signedBytes, byte => String.fromCharCode(byte)).join(""));
+
+      function decodeTransaction(
+        encoded: string
+      ): Transaction | VersionedTransaction {
+        const bytes = Uint8Array.from(
+          atob(encoded),
+          character => character.charCodeAt(0)
+        );
+
+        try {
+          return VersionedTransaction.deserialize(bytes);
+        } catch {
+          return Transaction.from(bytes);
+        }
+      }
+
+      function encodeTransaction(
+        transaction: Transaction | VersionedTransaction
+      ): string {
+        const bytes = transaction.serialize();
+
+        return btoa(
+          Array.from(
+            bytes,
+            byte => String.fromCharCode(byte)
+          ).join("")
+        );
+      }
+
+      const launchTransaction = decodeTransaction(
+        prepared.transaction
+      );
+
+      let signedTransaction: string;
+      let signedFundingTransaction: string | undefined;
+
+      if (prepared.fundingTransaction) {
+        if (!signAllTransactions) {
+          throw new Error(
+            "This launch requires a wallet that supports signing multiple transactions."
+          );
+        }
+
+        setLaunchStatus("Approve the funding and launch transactions...");
+
+        const fundingTransaction = decodeTransaction(
+          prepared.fundingTransaction
+        );
+
+        const signedTransactions = await signAllTransactions([
+          fundingTransaction,
+          launchTransaction
+        ]);
+
+        if (signedTransactions.length !== 2) {
+          throw new Error(
+            "Wallet did not return both signed transactions."
+          );
+        }
+
+        signedFundingTransaction = encodeTransaction(
+          signedTransactions[0]
+        );
+
+        signedTransaction = encodeTransaction(
+          signedTransactions[1]
+        );
+      } else {
+        setLaunchStatus("Approve the launch transaction...");
+
+        const signed = await signTransaction(
+          launchTransaction
+        );
+
+        signedTransaction = encodeTransaction(signed);
+      }
+
+      setLaunchStatus("Submitting signed transaction...");
+
       const submitResponse = await fetch("/api/stonkfun/submit", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ launchId: prepared.launchId, transaction: signedTransaction })
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          launchId: prepared.launchId,
+          transaction: signedTransaction,
+          ...(signedFundingTransaction
+            ? { fundingTransaction: signedFundingTransaction }
+            : {})
+        })
       });
       const submitted = await submitResponse.json() as { signature?: string; error?: string };
       if (!submitResponse.ok || !submitted.signature) throw new Error(submitted.error || "Unable to submit launch.");
       setSubmittedSignature(submitted.signature);
-      setLaunchStatus("Waiting for confirmation…");
+      setLaunchStatus("Waiting for confirmationâ€¦");
       const deadline = Date.now() + 120_000;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 2_000));
-        const response = await fetch(`/api/stonkfun/status?launchId=${encodeURIComponent(prepared.launchId)}`);
+        const response = await fetch(
+          `/api/stonkfun/status?launchId=${encodeURIComponent(prepared.launchId)}&signature=${encodeURIComponent(submitted.signature)}`
+        );
         const status = await response.json() as { state?: string; signature?: string; mint?: string; error?: string };
         if (!response.ok) throw new Error(status.error || "Unable to check launch status.");
         if (status.state === "failed") throw new Error(status.error || "StonkFun launch failed.");
         if (status.state === "confirmed" && status.mint) {
-          setResult({ mint: status.mint, sig: status.signature || submitted.signature });
-          setLaunchStatus("Launch confirmed.");
+          if (
+            launchMode === "standard" &&
+            redirectFees &&
+            feeRecipient.trim()
+          ) {
+            setLaunchStatus("Registering creator fee recipient...");
+
+            const redirectResponse = await fetch(
+              "/api/creator-fees/redirect",
+              {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json"
+                },
+                body: JSON.stringify({
+                  creator: publicKey.toBase58(),
+                  tokenMint: status.mint,
+                  recipient: feeRecipient.trim()
+                })
+              }
+            );
+
+            const redirectResult =
+              await redirectResponse.json() as {
+                ok?: boolean;
+                error?: string;
+              };
+
+            if (!redirectResponse.ok || !redirectResult.ok) {
+              throw new Error(
+                redirectResult.error ||
+                  "Launch succeeded, but the fee recipient could not be registered."
+              );
+            }
+          }
+
+          setResult({
+            mint: status.mint,
+            sig: status.signature || submitted.signature
+          });
+
+          setLaunchStatus(
+            launchMode === "standard" &&
+            redirectFees &&
+            feeRecipient.trim()
+              ? "Launch confirmed. Fee recipient registered."
+              : "Launch confirmed."
+          );
+
           return;
         }
       }
@@ -215,11 +375,133 @@ export default function LaunchForm() {
     }
   }
 
-  const categories = ["All", ...Array.from(new Set(pairs.map(pair => pair.category))).sort()];
+  async function claimCreatorRewards() {
+    setError("");
+    setClaimStatus("");
+    setClaimSignature("");
+
+    if (!publicKey) {
+      setError("Connect the creator wallet first.");
+      return;
+    }
+
+    if (!signTransaction) {
+      setError(
+        "This wallet does not support transaction signing."
+      );
+      return;
+    }
+
+    if (!result?.mint) {
+      setError("No confirmed token launch was found.");
+      return;
+    }
+
+    if (
+      launchMode !== "standard" ||
+      !redirectFees ||
+      !feeRecipient.trim()
+    ) {
+      setError(
+        "Creator reward redirection is not enabled for this launch."
+      );
+      return;
+    }
+
+    setClaimBusy(true);
+
+    try {
+      setClaimStatus("Preparing creator reward claim...");
+
+      const response = await fetch(
+        "/api/creator-fees/claim",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            creator: publicKey.toBase58(),
+            recipient: feeRecipient.trim(),
+            tokenMint: result.mint
+          })
+        }
+      );
+
+      const prepared = await response.json() as {
+        transaction?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !prepared.transaction) {
+        throw new Error(
+          prepared.error ||
+            "Unable to prepare creator reward claim."
+        );
+      }
+
+      const bytes = Uint8Array.from(
+        atob(prepared.transaction),
+        character => character.charCodeAt(0)
+      );
+
+      const transaction = Transaction.from(bytes);
+
+      setClaimStatus(
+        "Approve the creator reward claim in your wallet..."
+      );
+
+      const signed = await signTransaction(transaction);
+
+      setClaimStatus("Submitting creator reward claim...");
+
+      const signature = await connection.sendRawTransaction(
+        signed.serialize(),
+        {
+          skipPreflight: false,
+          maxRetries: 3
+        }
+      );
+
+      setClaimSignature(signature);
+      setClaimStatus("Confirming creator reward claim...");
+
+      const confirmation =
+        await connection.confirmTransaction(
+          signature,
+          "confirmed"
+        );
+
+      if (confirmation.value.err) {
+        throw new Error(
+          "Creator reward claim failed on-chain."
+        );
+      }
+
+      setClaimStatus(
+        "Creator rewards sent to the nominated wallet."
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to claim creator rewards."
+      );
+
+      setClaimStatus("");
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+  const normalizedPairSearch = pairSearch.trim().toLowerCase();
+
   const visiblePairs = pairs.filter(pair => {
-    const search = pairSearch.trim().toLowerCase();
-    return (pairCategory === "All" || pair.category === pairCategory) &&
-      (!search || `${pair.symbol} ${pair.name} ${pair.mint}`.toLowerCase().includes(search));
+    if (!normalizedPairSearch) return true;
+
+    return (
+      pair.symbol.toLowerCase().includes(normalizedPairSearch) ||
+      pair.name.toLowerCase().includes(normalizedPairSearch)
+    );
   });
   const isMainnet = CONFIG.network === "mainnet-beta";
 
@@ -230,36 +512,308 @@ export default function LaunchForm() {
       <p className="small" style={{marginBottom:22}}>Add the essentials, then approve token creation with your connected wallet.</p>
 
       <div className="row">
-        <div><label className="label">Token name</label><input className="input" value={name} onChange={e=>setName(e.target.value)} placeholder="Early Bird Coin"/></div>
-        <div><label className="label">Ticker</label><input className="input" value={symbol} onChange={e=>setSymbol(e.target.value)} placeholder="EBIRD" maxLength={10}/></div>
+        <div><label className="label">Token name</label><input className="input" value={name} onChange={e=>setName(e.target.value)} placeholder="MidCurve Coin"/></div>
+        <div><label className="label">Ticker</label><input className="input" value={symbol} onChange={e=>setSymbol(e.target.value)} placeholder="MID" maxLength={10}/></div>
       </div>
 
       <div style={{marginTop:14}}><label className="label">Description</label><textarea className="input" value={description} onChange={e=>setDescription(e.target.value)} placeholder="What is this token?" rows={4} maxLength={500}/></div>
 
       <section className="form-section">
         <h3>Launch settings</h3>
-        <p className="small">{isMainnet ? "Choose a live StonkFun / Raydium LaunchLab quote pair." : "These amounts are retained for the future bonding-curve launch flow. They do not execute a buy or establish a token price today."}</p>
-        {isMainnet && <div className="pair-selector">
-          <div className="row"><div><label className="label">Search pairs</label><input className="input" value={pairSearch} onChange={event=>setPairSearch(event.target.value)} placeholder="Symbol, name, or mint" /></div><div><label className="label">Category</label><select className="input" value={pairCategory} onChange={event=>setPairCategory(event.target.value)}>{categories.map(category=><option key={category}>{category}</option>)}</select></div></div>
-          <label className="label" style={{marginTop:14}}>Quote pair</label>
-          <select className="input" value={quoteMint} onChange={event=>setQuoteMint(event.target.value)} disabled={pairsBusy}>
-            <option value="">{pairsBusy ? "Loading live pairs…" : "Select a quote pair"}</option>
-            {visiblePairs.map(pair=><option key={pair.mint} value={pair.mint}>{pair.symbol} — {pair.name} ({pair.category})</option>)}
-          </select>
-        </div>}
-        <div className="row"><div><label className="label">Quote amount (SOL)</label><input className="input" inputMode="decimal" value={quoteAmount} onChange={e=>setQuoteAmount(e.target.value)} /></div><div><label className="label">Dev buy amount (SOL)</label><input className="input" inputMode="decimal" value={devBuyAmount} onChange={e=>setDevBuyAmount(e.target.value)} /></div></div>
-        <div className="notice" style={{marginTop:14}}><strong>Estimated tokens received: {estimateTokensReceived({ quoteAmount, devBuyAmount }).estimatedTokens ?? "Not yet available"}.</strong><br/>A real bonding-curve pricing mechanism has not been implemented, so this is not an executable quote or a token-price estimate.</div>
-      </section>
 
-      <section className="form-section">
-        <h3>Creator settings</h3>
-        <div><label className="label">Creator tax</label><select className="input" value={creatorTaxBps} onChange={e=>setCreatorTaxBps(Number(e.target.value) as CreatorTaxBps)}><option value={100}>1%</option><option value={200}>2%</option><option value={300}>3%</option></select></div>
-        <label className="checkbox-label"><input type="checkbox" checked={creatorFeeDonationEnabled} onChange={e => setCreatorFeeDonationEnabled(e.target.checked)} /> Donate creator fees</label>
-        {creatorFeeDonationEnabled && <div style={{marginTop:14}}><label className="label">Creator fee recipient wallet</label><input className="input" value={feeRecipient} onChange={e=>setFeeRecipient(e.target.value)} placeholder="Connected wallet address" /><p className="small" style={{margin:"8px 0 0"}}>Defaults to your connected wallet. Enter only a Solana public address—never a private key, seed phrase, or secret key.</p><p className="small" style={{margin:"8px 0 0"}}>Creator fees will be directed to this wallet when creator-fee collection is enabled in the trading system.</p></div>}
-        <div className="fee-summary"><strong>Fee summary</strong><span>Creator tax: {creatorTaxBps / 100}% (configuration only; not collected by current Devnet token creation).</span><span>Creator-fee donation: {creatorFeeDonationEnabled ? "enabled for the recipient wallet above" : "disabled"}.</span><span>EARLY BIRD platform fee: {CONFIG.platformFeeBps} bps (0.05%) to the configured development wallet (not editable, not collected by token creation).</span></div>
-      </section>
+        {launchMode === "standard" && (
+          <div
+            className="card"
+            style={{
+              marginTop: 20,
+              marginBottom: 20,
+              padding: 20
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 20,
+                alignItems: "center"
+              }}
+            >
+              <div>
+                <div className="badge">CREATOR REWARDS</div>
 
-      <section className="form-section">
+                <h3 style={{ marginTop: 10, marginBottom: 6 }}>
+                  Redirect Your Fees
+                </h3>
+
+                <p className="small" style={{ margin: 0 }}>
+                  Send creator rewards from this launch to another
+                  Solana wallet.
+                </p>
+              </div>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={redirectFees}
+                  onChange={(e) => {
+                    setRedirectFees(e.target.checked);
+
+                    if (!e.target.checked) {
+                      setFeeRecipient("");
+                    }
+                  }}
+                />
+
+                Enable
+              </label>
+            </div>
+
+            {redirectFees && (
+              <div style={{ marginTop: 18 }}>
+                <label className="label">
+                  Rewards recipient wallet
+                </label>
+
+                <input
+                  className="input"
+                  value={feeRecipient}
+                  onChange={(e) =>
+                    setFeeRecipient(e.target.value.trim())
+                  }
+                  placeholder="Enter Solana wallet address"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+
+                <p
+                  className="small"
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0
+                  }}
+                >
+                  Creator rewards will be redirected to this wallet
+                  once the payout method has been connected.
+                </p>
+              </div>
+            )}
+
+            <p
+              className="small"
+              style={{
+                marginTop: 14,
+                marginBottom: 0,
+                opacity: 0.75
+              }}
+            >
+              Available for Standard SOL launches only.
+            </p>
+          </div>
+        )}
+
+        <label className="label">Launch type</label>
+        <select
+          className="input"
+          value={launchMode}
+          onChange={event => {
+            const mode = event.target.value as "standard" | "rewards";
+            setLaunchMode(mode);
+            if (mode === "standard") setQuoteMint("");
+          }}
+        >
+          <option value="standard">Standard SOL launch</option>
+          <option value="rewards">Rewards pair launch</option>
+        </select>
+
+        {launchMode === "standard" && (
+          <div className="notice" style={{marginTop:14}}>
+            <strong>Standard SOL launch</strong><br/>
+            Launch against SOL. Creator fee routing will be configurable for the
+            creator wallet, token holders, or a nominated wallet.
+          </div>
+        )}
+
+        {launchMode === "rewards" && (
+          <div className="pair-selector" style={{marginTop:14}}>
+            <label className="label">Rewards pair</label>
+
+            {pairsBusy ? (
+              <div className="notice">
+                Loading reward pairs...
+              </div>
+            ) : (
+              <>
+                <input
+                  className="input"
+                  type="search"
+                  value={pairSearch}
+                  onChange={event => setPairSearch(event.target.value)}
+                  placeholder="Search by ticker or pair name..."
+                  autoComplete="off"
+                  style={{
+                    marginBottom: 12
+                  }}
+                />
+
+                <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                  gap: 10,
+                  maxHeight: 340,
+                  overflowY: "auto",
+                  padding: 4
+                }}
+              >
+                {visiblePairs.map(pair => {
+                  const selected = quoteMint === pair.mint;
+
+                  return (
+                    <button
+                      key={pair.mint}
+                      type="button"
+                      onClick={() => setQuoteMint(pair.mint)}
+                      style={{
+                        padding: 12,
+                        borderRadius: 14,
+                        border: selected
+                          ? "2px solid #ffffff"
+                          : "1px solid rgba(255,255,255,0.16)",
+                        background: selected
+                          ? "rgba(255,255,255,0.12)"
+                          : "rgba(255,255,255,0.04)",
+                        cursor: "pointer",
+                        color: "inherit",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 8,
+                        minHeight: 112
+                      }}
+                    >
+                      {pair.logoUrl ? (
+                        <img
+                          src={pair.logoUrl}
+                          alt={`${pair.symbol} logo`}
+                          width={48}
+                          height={48}
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: "50%",
+                            objectFit: "cover"
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: "50%",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: "rgba(255,255,255,0.08)",
+                            fontWeight: 800
+                          }}
+                        >
+                          {pair.symbol.slice(0, 2)}
+                        </div>
+                      )}
+
+                      <strong>{pair.symbol}</strong>
+
+                      <span
+                        style={{
+                          fontSize: 11,
+                          opacity: 0.65,
+                          textAlign: "center",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          width: "100%"
+                        }}
+                      >
+                        {pair.name}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {visiblePairs.length === 0 && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      padding: 24,
+                      textAlign: "center",
+                      opacity: 0.65
+                    }}
+                  >
+                    No reward pairs found for "{pairSearch}".
+                  </div>
+                )}
+                </div>
+              </>
+            )}
+
+            <div style={{marginTop:14}}>
+              <label className="label">Reward tax</label>
+
+              <select
+                className="input"
+                value={rewardTaxBps}
+                onChange={event =>
+                  setRewardTaxBps(Number(event.target.value) as 100 | 300)
+                }
+              >
+                <option value={100}>1%</option>
+                <option value={300}>3%</option>
+              </select>
+
+              <p className="small" style={{marginTop:6}}>
+                Select the StonkFun reward tax for this rewards launch.
+              </p>
+            </div>
+
+            <div className="notice" style={{marginTop:14}}>
+              Rewards launches use the selected supported asset as their pair.
+              Reward/fee distribution to holders will be connected to the
+              supported StonkFun launch configuration.
+            </div>
+          </div>
+        )}
+
+        <div className="row" style={{marginTop:14}}>
+          <div>
+            <label className="label">Launch amount (SOL)</label>
+            <input
+              className="input"
+              inputMode="decimal"
+              value={quoteAmount}
+              onChange={e => setQuoteAmount(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="label">Dev buy amount (SOL)</label>
+            <input
+              className="input"
+              inputMode="decimal"
+              value={devBuyAmount}
+              onChange={e => setDevBuyAmount(e.target.value)}
+            />
+          </div>
+        </div>
+      </section>
+<section className="form-section">
         <h3>Optional links</h3><p className="small">Public token profile metadata. All links must use HTTPS.</p>
         <div className="row"><div><label className="label">Telegram</label><input className="input" value={telegramUrl} onChange={e=>setTelegramUrl(e.target.value)} placeholder="https://t.me/earlybird" /></div><div><label className="label">X</label><input className="input" value={xUrl} onChange={e=>setXUrl(e.target.value)} placeholder="https://x.com/earlybird" /></div></div>
         <div style={{marginTop:14}}><label className="label">Website</label><input className="input" value={website} onChange={e=>setWebsite(e.target.value)} placeholder="https://example.com" /></div>
@@ -273,19 +827,129 @@ export default function LaunchForm() {
         </div>
       </div>
 
-      <button className="btn btn-primary" style={{width:"100%", marginTop:18}} onClick={isMainnet ? launchStonkFunToken : launchDevnetToken} disabled={!connected || busy || (isMainnet && (!quoteMint || pairsBusy))}>
-        {busy ? (launchStatus || "Creating token…") : connected ? (isMainnet ? "LAUNCH WITH STONKFUN" : "CREATE TOKEN") : "CONNECT WALLET"}
+      <button className="btn btn-primary" style={{width:"100%", marginTop:18}} onClick={isMainnet ? launchStonkFunToken : launchDevnetToken} disabled={!connected || busy || (isMainnet && launchMode === "rewards" && (!quoteMint || pairsBusy))}>
+        {busy ? (launchStatus || "Creating tokenâ€¦") : connected ? (isMainnet ? "LAUNCH WITH STONKFUN" : "CREATE TOKEN") : "CONNECT WALLET"}
       </button>
 
       {error && <div className="error" style={{marginTop:14}}>{error}</div>}
-      {submittedSignature && !result && <div className="notice" style={{marginTop:14}}><strong>Transaction submitted.</strong><div className="small">Signature: {submittedSignature}</div><a className="small" href={`https://explorer.solana.com/tx/${submittedSignature}`} target="_blank" rel="noreferrer">View transaction →</a></div>}
+      {submittedSignature && !result && <div className="notice" style={{marginTop:14}}><strong>Transaction submitted.</strong><div className="small">Signature: {submittedSignature}</div><a className="small" href={`https://explorer.solana.com/tx/${submittedSignature}`} target="_blank" rel="noreferrer">View transaction â†’</a></div>}
       {result && <div className="success" style={{marginTop:14}}>
         <div><strong>Token created.</strong></div>
         <div className="small" style={{marginTop:6}}>Mint: {result.mint}</div>
         <div className="small" style={{marginTop:6}}>Transaction: {result.sig}</div>
-        <a className="small" href={`https://explorer.solana.com/address/${result.mint}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View mint on Solana Explorer →</a>
-        <div><a className="small" href={`https://explorer.solana.com/tx/${result.sig}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View transaction →</a></div>
+        <a className="small" href={`https://explorer.solana.com/address/${result.mint}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View mint on Solana Explorer â†’</a>
+        <div><a className="small" href={`https://explorer.solana.com/tx/${result.sig}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View transaction â†’</a></div>
       </div>}
-    </div>
+      {result &&
+        isMainnet &&
+        launchMode === "standard" &&
+        redirectFees &&
+        feeRecipient.trim() && (
+          <div
+            className="card"
+            style={{
+              marginTop: 14,
+              padding: 18
+            }}
+          >
+            <div className="badge">
+              CREATOR REWARDS
+            </div>
+
+            <h3 style={{ marginTop: 10, marginBottom: 6 }}>
+              Redirected creator fees
+            </h3>
+
+            <p className="small" style={{ marginBottom: 14 }}>
+              Claim available creator rewards and send them to:
+            </p>
+
+            <div
+              className="small"
+              style={{
+                wordBreak: "break-all",
+                marginBottom: 14
+              }}
+            >
+              {feeRecipient}
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: "100%" }}
+              disabled={claimBusy}
+              onClick={claimCreatorRewards}
+            >
+              {claimBusy
+                ? claimStatus || "CLAIMING..."
+                : "CLAIM CREATOR REWARDS"}
+            </button>
+
+            {claimStatus && (
+              <div
+                className="notice"
+                style={{ marginTop: 12 }}
+              >
+                {claimStatus}
+              </div>
+            )}
+
+            {claimSignature && (
+              <div
+                className="success"
+                style={{ marginTop: 12 }}
+              >
+                <strong>
+                  Creator rewards claimed.
+                </strong>
+
+                <div
+                  className="small"
+                  style={{ marginTop: 6 }}
+                >
+                  Transaction: {claimSignature}
+                </div>
+
+                <a
+                  className="small"
+                  href={`https://explorer.solana.com/tx/${claimSignature}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View claim on Solana Explorer →
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

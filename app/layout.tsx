@@ -1,9 +1,9 @@
-import "./globals.css";
+﻿import "./globals.css";
 import { WalletContext } from "../components/WalletContext";
 
 export const metadata = {
-  title: "EARLY BIRD — Solana Launchpad",
-  description: "Launch tokens early with EARLY BIRD."
+  title: "MIDCURVE â€” Solana Launchpad",
+  description: "Launch tokens early with MIDCURVE."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -15,3 +15,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+

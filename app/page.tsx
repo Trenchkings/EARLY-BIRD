@@ -1,16 +1,17 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import LaunchForm from "../components/LaunchForm";
+import MarketSections from "../components/MarketSections";
 
 export default function Home() {
   return (
     <main className="eb-shell">
       <nav className="eb-nav">
         <div className="eb-brand">
-          <Image src="/early-bird-logo.jpeg" alt="EARLY BIRD" width={42} height={42}/>
-          <span>EARLY BIRD</span>
+          <Image src="/midcurve-logo.jpg" alt="MIDCURVE" width={42} height={42}/>
+          <span>MIDCURVE</span>
         </div>
         <div style={{display:"flex", gap:10, alignItems:"center"}}>
           <a className="btn btn-secondary" href="#launch">Launch</a>
@@ -24,15 +25,15 @@ export default function Home() {
         <section className="hero">
           <div>
             <span className="badge">Solana token launchpad</span>
-            <h1>Launch early.<br/><span style={{color:"#bfeaff"}}>Fly first.</span></h1>
-            <p>EARLY BIRD is a focused interface for creating Solana tokens. Connect your wallet, add your token details, and launch when you are ready.</p>
+            <h1>Launch tokens.<br/><span style={{color:"#bfeaff"}}>Find the curve.</span></h1>
+            <p>Launch, discover and track tokens from one place. Follow the market, find opportunities on the curve and launch directly from MIDCURVE.</p>
             <div style={{display:"flex", gap:10, marginTop:24, flexWrap:"wrap"}}>
               <a className="btn btn-primary" href="#launch">Create a token</a>
               <a className="btn btn-secondary" href="#how">How it works</a>
             </div>
           </div>
           <div className="card" style={{textAlign:"center"}}>
-            <Image src="/early-bird-logo.jpeg" alt="EARLY BIRD logo" width={320} height={320} style={{width:"100%", maxWidth:320, height:"auto", borderRadius:"50%", margin:"0 auto"}}/>
+            <Image src="/midcurve-logo.jpg" alt="MIDCURVE logo" width={320} height={320} style={{width:"100%", maxWidth:320, height:"auto", borderRadius:"50%", margin:"0 auto"}}/>
           </div>
         </section>
 
@@ -42,8 +43,23 @@ export default function Home() {
           <div className="card"><div className="small">03</div><h3>Launch</h3><p className="small">Approve the token creation transaction from your connected wallet.</p></div>
         </section>
 
-        <section id="launch" style={{marginTop:50}}><LaunchForm /></section>
+                <section id="launch" style={{marginTop:50}}>
+          <div style={{marginBottom:18}}>
+            <span className="badge">LAUNCH NOW</span>
+            <h2 style={{marginTop:12}}>Launch your token</h2>
+            <p className="small">
+              Create your token, choose your pair and configure your launch.
+            </p>
+          </div>
+
+          <LaunchForm />
+        </section>
+
+        <MarketSections />
       </div>
     </main>
   );
 }
+
+
+

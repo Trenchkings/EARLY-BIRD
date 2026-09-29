@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -13,7 +13,7 @@ export default function Admin() {
   async function authenticate() {
     if (!publicKey || !signMessage) return setStatus("Connect the development wallet first.");
     if (publicKey.toBase58() !== CONFIG.devWallet) return setStatus("This wallet is not the configured administrator.");
-    const nonce = `EARLY BIRD admin login ${Date.now()}`;
+    const nonce = `MIDCURVE admin login ${Date.now()}`;
     const sig = await signMessage(new TextEncoder().encode(nonce));
     const res = await fetch("/api/admin/verify", {
       method:"POST",
@@ -25,7 +25,7 @@ export default function Admin() {
   }
 
   return <main className="eb-shell">
-    <nav className="eb-nav"><div className="eb-brand"><img src="/early-bird-logo.jpeg" alt="EARLY BIRD"/><span>EARLY BIRD ADMIN</span></div><WalletMultiButton/></nav>
+    <nav className="eb-nav"><div className="eb-brand"><img src="/midcurve-logo.jpg" alt="MIDCURVE"/><span>MIDCURVE ADMIN</span></div><WalletMultiButton/></nav>
     <div className="eb-container">
       <div className="card" style={{maxWidth:900, margin:"0 auto"}}>
         <span className="badge">ADMIN</span>
