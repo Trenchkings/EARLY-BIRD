@@ -15,7 +15,10 @@ import { CONFIG } from "../lib/config";
 import { CreatorTaxBps, TokenMetadata, validateTokenLogo, validateTokenMetadata } from "../lib/token-metadata";
 import { estimateTokensReceived } from "../lib/launch-pricing";
 
+type LaunchProvider = "stonk" | "pumpfun";
+
 export default function LaunchForm() {
+  const [launchProvider, setLaunchProvider] = useState<LaunchProvider>("stonk");
   const [redirectFees, setRedirectFees] = useState(false);
   const { connection } = useConnection();
   const {
@@ -65,16 +68,37 @@ export default function LaunchForm() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/stonkfun/pairs", { signal: controller.signal })
+    const endpoint =
+      launchProvider === "stonk"
+        ? "/api/stonkfun/pairs"
+        : "/api/pumpfun/pairs";
+
+    setPairsBusy(true);
+    setPairs([]);
+    setQuoteMint("");
+
+    fetch(endpoint, { signal: controller.signal })
       .then(async response => {
         const body = await response.json() as { pairs?: typeof pairs; error?: string };
-        if (!response.ok) throw new Error(body.error || "Unable to load StonkFun pairs.");
+        if (!response.ok) {
+          throw new Error(
+            body.error ||
+              (launchProvider === "stonk"
+                ? "Unable to load StonkFun pairs."
+                : "Unable to load Pump.fun pairs.")
+          );
+        }
         setPairs(body.pairs || []);
       })
-      .catch(reason => { if (reason instanceof Error && reason.name !== "AbortError") setError(reason.message); })
+      .catch(reason => {
+        if (reason instanceof Error && reason.name !== "AbortError") {
+          setError(reason.message);
+        }
+      })
       .finally(() => setPairsBusy(false));
+
     return () => controller.abort();
-  }, []);
+  }, [launchProvider]);
 
   function onLogoChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -519,9 +543,93 @@ export default function LaunchForm() {
       <div style={{marginTop:14}}><label className="label">Description</label><textarea className="input" value={description} onChange={e=>setDescription(e.target.value)} placeholder="What is this token?" rows={4} maxLength={500}/></div>
 
       <section className="form-section">
+        <h3>Launch via</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {([
+            {
+              id: "stonk" as const,
+              name: "STONK",
+              logo: "/launchpads/stonk-logo.jpg"
+            },
+            {
+              id: "pumpfun" as const,
+              name: "PUMP.FUN",
+              logo: "/launchpads/pump-logo.jpg"
+            }
+          ]).map(provider => {
+            const selected = launchProvider === provider.id;
+
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                onClick={() => {
+                  setLaunchProvider(provider.id);
+                  setError("");
+                  setResult(null);
+                  setLaunchStatus("");
+                  setSubmittedSignature("");
+                  setPairSearch("");
+
+                  if (provider.id === "pumpfun") {
+                    setLaunchMode("standard");
+                    setRedirectFees(false);
+                    setFeeRecipient("");
+                  }
+                }}
+                aria-pressed={selected}
+                style={{
+                  borderRadius: 18,
+                  border: selected
+                    ? "2px solid #ffffff"
+                    : "1px solid rgba(255,255,255,0.16)",
+                  background: selected
+                    ? "rgba(255,255,255,0.10)"
+                    : "rgba(255,255,255,0.035)",
+                  color: "inherit",
+                  padding: "18px 14px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 12,
+                  minHeight: 88,
+                  boxShadow: selected
+                    ? "0 0 0 3px rgba(255,255,255,0.04)"
+                    : "none"
+                }}
+              >
+                <img
+                  src={provider.logo}
+                  alt={`${provider.name} logo`}
+                  width={48}
+                  height={48}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 12,
+                    objectFit: "cover"
+                  }}
+                />
+                <strong style={{ fontSize: 18 }}>
+                  {provider.name}
+                </strong>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="form-section">
         <h3>Launch settings</h3>
 
-        {launchMode === "standard" && (
+        {launchProvider === "stonk" && launchMode === "standard" && (
           <div
             className="card"
             style={{
@@ -619,6 +727,8 @@ export default function LaunchForm() {
           </div>
         )}
 
+        {launchProvider === "stonk" && (
+          <>
         <label className="label">Launch type</label>
         <select
           className="input"
@@ -632,8 +742,10 @@ export default function LaunchForm() {
           <option value="standard">Standard SOL launch</option>
           <option value="rewards">Rewards pair launch</option>
         </select>
+          </>
+        )}
 
-        {launchMode === "standard" && (
+        {launchProvider === "stonk" && launchMode === "standard" && (
           <div className="notice" style={{marginTop:14}}>
             <strong>Standard SOL launch</strong><br/>
             Launch against SOL. Creator fee routing will be configurable for the
@@ -641,7 +753,7 @@ export default function LaunchForm() {
           </div>
         )}
 
-        {launchMode === "rewards" && (
+        {launchProvider === "stonk" && launchMode === "rewards" && (
           <div className="pair-selector" style={{marginTop:14}}>
             <label className="label">Rewards pair</label>
 
@@ -791,6 +903,58 @@ export default function LaunchForm() {
           </div>
         )}
 
+        {launchProvider === "pumpfun" && (
+          <div className="pair-selector" style={{marginTop:14}}>
+            <label className="label">Pump.fun pair</label>
+
+            {pairsBusy ? (
+              <div className="notice">Loading Pump.fun pairs...</div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                  gap: 10
+                }}
+              >
+                {pairs.map(pair => {
+                  const selected = quoteMint === pair.mint;
+
+                  return (
+                    <button
+                      key={pair.mint}
+                      type="button"
+                      onClick={() => setQuoteMint(pair.mint)}
+                      style={{
+                        padding: 14,
+                        borderRadius: 14,
+                        border: selected
+                          ? "2px solid #ffffff"
+                          : "1px solid rgba(255,255,255,0.16)",
+                        background: selected
+                          ? "rgba(255,255,255,0.12)"
+                          : "rgba(255,255,255,0.04)",
+                        cursor: "pointer",
+                        color: "inherit",
+                        minHeight: 78
+                      }}
+                    >
+                      <strong>{pair.symbol}</strong>
+                      <div className="small" style={{marginTop:6}}>
+                        {pair.name}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="notice" style={{marginTop:14}}>
+              Pump.fun launch transaction wiring is the next integration step.
+            </div>
+          </div>
+        )}
+
         <div className="row" style={{marginTop:14}}>
           <div>
             <label className="label">Launch amount (SOL)</label>
@@ -827,8 +991,39 @@ export default function LaunchForm() {
         </div>
       </div>
 
-      <button className="btn btn-primary" style={{width:"100%", marginTop:18}} onClick={isMainnet ? launchStonkFunToken : launchDevnetToken} disabled={!connected || busy || (isMainnet && launchMode === "rewards" && (!quoteMint || pairsBusy))}>
-        {busy ? (launchStatus || "Creating tokenâ€¦") : connected ? (isMainnet ? "LAUNCH WITH STONKFUN" : "CREATE TOKEN") : "CONNECT WALLET"}
+      <button
+        className="btn btn-primary"
+        style={{width:"100%", marginTop:18}}
+        onClick={() => {
+          if (launchProvider === "pumpfun") {
+            setError("Pump.fun transaction creation is not enabled yet.");
+            return;
+          }
+
+          if (isMainnet) {
+            void launchStonkFunToken();
+          } else {
+            void launchDevnetToken();
+          }
+        }}
+        disabled={
+          !connected ||
+          busy ||
+          (launchProvider === "stonk" &&
+            isMainnet &&
+            launchMode === "rewards" &&
+            (!quoteMint || pairsBusy))
+        }
+      >
+        {busy
+          ? (launchStatus || "Creating token...")
+          : !connected
+            ? "CONNECT WALLET"
+            : launchProvider === "pumpfun"
+              ? "LAUNCH WITH PUMP.FUN"
+              : isMainnet
+                ? "LAUNCH WITH STONK"
+                : "CREATE TOKEN"}
       </button>
 
       {error && <div className="error" style={{marginTop:14}}>{error}</div>}
@@ -841,6 +1036,7 @@ export default function LaunchForm() {
         <div><a className="small" href={`https://explorer.solana.com/tx/${result.sig}${isMainnet ? "" : "?cluster=devnet"}`} target="_blank" rel="noreferrer">View transaction â†’</a></div>
       </div>}
       {result &&
+        launchProvider === "stonk" &&
         isMainnet &&
         launchMode === "standard" &&
         redirectFees &&
