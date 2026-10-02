@@ -1,0 +1,824 @@
+﻿"use client";
+
+import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import TokenChart from "../../../components/TokenChart";
+
+type TokenData = {
+  pool: string | null;
+  mint: string;
+  name: string;
+  symbol: string;
+  imageUrl: string | null;
+
+  quote: {
+    mint: string | null;
+    symbol: string | null;
+    name: string | null;
+    logoUrl: string | null;
+    category: string | null;
+  };
+
+  market: {
+    priceUsd: number | null;
+    marketCapUsd: number | null;
+    fdvUsd: number | null;
+    volume24hUsd: number | null;
+    liquidityUsd: number | null;
+    priceChange24h: number | null;
+    peakMarketCapUsd: number | null;
+  };
+
+  graduation: {
+    progress: number;
+    targetMarketCapUsd: number | null;
+    status: string | null;
+    graduatedAt: string | null;
+  };
+
+  socials: {
+    website: string | null;
+    twitter: string | null;
+    telegram: string | null;
+  };
+
+  creator: string | null;
+  launchpad: string | null;
+  createdAt: string | null;
+
+  rewards: {
+    enabled: boolean;
+    transferTaxBps: number | null;
+    quoteOnlyFees: boolean | null;
+  };
+};
+
+function money(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "—";
+
+  if (value >= 1_000_000_000) {
+    return `$${(value / 1_000_000_000).toFixed(2)}B`;
+  }
+
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `$${(value / 1_000).toFixed(2)}K`;
+  }
+
+  return `$${value.toLocaleString(undefined, {
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function price(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "—";
+
+  if (value >= 1) {
+    return `$${value.toLocaleString(undefined, {
+      maximumFractionDigits: 6
+    })}`;
+  }
+
+  return `$${value.toLocaleString(undefined, {
+    maximumSignificantDigits: 6
+  })}`;
+}
+
+function shortAddress(value: string | null) {
+  if (!value) return "—";
+  return `${value.slice(0, 6)}...${value.slice(-6)}`;
+}
+
+function Stat({
+  label,
+  value
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div
+      className="card"
+      style={{
+        padding: 18,
+        minHeight: 105
+      }}
+    >
+      <div className="small">{label}</div>
+
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 800,
+          marginTop: 8
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+export default function TokenPage({
+  params
+}: {
+  params: Promise<{ mint: string }>;
+}) {
+  const { mint } = use(params);
+
+  const [token, setToken] = useState<TokenData | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadToken() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await fetch(
+          `/api/stonkfun/token/${encodeURIComponent(mint)}`,
+          {
+            cache: "no-store",
+            signal: controller.signal
+          }
+        );
+
+        const body = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            body.error || "Unable to load token."
+          );
+        }
+
+        setToken(body.token);
+      } catch (reason) {
+        if (
+          reason instanceof Error &&
+          reason.name !== "AbortError"
+        ) {
+          setError(reason.message);
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadToken();
+
+    return () => controller.abort();
+  }, [mint]);
+
+  if (loading) {
+    return (
+      <main className="eb-shell">
+        <div
+          className="eb-container"
+          style={{ paddingTop: 60 }}
+        >
+          <div className="card">
+            <h2>Loading token...</h2>
+            <p className="small">
+              Fetching live market information.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error || !token) {
+    return (
+      <main className="eb-shell">
+        <div
+          className="eb-container"
+          style={{ paddingTop: 60 }}
+        >
+          <div className="card">
+            <h2>Token unavailable</h2>
+
+            <p className="small">
+              {error || "Token could not be loaded."}
+            </p>
+
+            <Link
+              className="btn btn-secondary"
+              href="/"
+            >
+              Back to MIDCURVE
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const change = token.market.priceChange24h;
+
+  const graduationPercent = Math.max(
+    0,
+    Math.min(100, (token.graduation.progress || 0) * 100)
+  );
+
+  const graduated =
+    token.graduation.status === "graduated" ||
+    graduationPercent >= 100;
+
+  return (
+    <main className="eb-shell">
+      <nav className="eb-nav">
+        <Link
+          href="/"
+          className="eb-brand"
+          style={{ textDecoration: "none" }}
+        >
+          <span>🐦</span>
+          <span>MIDCURVE</span>
+        </Link>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center"
+          }}
+        >
+          <Link
+            href="/#launch"
+            className="btn btn-primary"
+          >
+            Launch token
+          </Link>
+
+          <Link
+            href="/"
+            className="btn btn-secondary"
+          >
+            Home
+          </Link>
+        </div>
+      </nav>
+
+      <div
+        className="eb-container"
+        style={{ paddingTop: 34, paddingBottom: 80 }}
+      >
+        {/* TOKEN HEADER */}
+
+        <section
+          className="card"
+          style={{ padding: 24 }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 24,
+              flexWrap: "wrap"
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: 18,
+                alignItems: "center"
+              }}
+            >
+              {token.imageUrl ? (
+                <img
+                  src={token.imageUrl}
+                  alt={`${token.symbol} logo`}
+                  width={84}
+                  height={84}
+                  style={{
+                    width: 84,
+                    height: 84,
+                    borderRadius: "50%",
+                    objectFit: "cover"
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 84,
+                    height: 84,
+                    borderRadius: "50%",
+                    display: "grid",
+                    placeItems: "center",
+                    background:
+                      "rgba(255,255,255,0.08)",
+                    fontSize: 26,
+                    fontWeight: 900
+                  }}
+                >
+                  {token.symbol.slice(0, 2)}
+                </div>
+              )}
+
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                    flexWrap: "wrap"
+                  }}
+                >
+                  <h1
+                    style={{
+                      margin: 0,
+                      fontSize: 36
+                    }}
+                  >
+                    {token.name}
+                  </h1>
+
+                  <span className="badge">
+                    ${token.symbol}
+                  </span>
+
+                  {graduated && (
+                    <span className="badge">
+                      GRADUATED
+                    </span>
+                  )}
+
+                  {token.rewards.enabled && (
+                    <span className="badge">
+                      REWARDS
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  className="small"
+                  style={{ marginTop: 8 }}
+                >
+                  {shortAddress(token.mint)}
+                </div>
+              </div>
+            </div>
+
+            {/* PAIR */}
+
+            <div>
+              <div className="small">
+                PAIRED WITH
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  marginTop: 8
+                }}
+              >
+                {token.quote.logoUrl && (
+                  <img
+                    src={token.quote.logoUrl}
+                    alt={`${token.quote.symbol || "Pair"} logo`}
+                    width={38}
+                    height={38}
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: "50%",
+                      objectFit: "cover"
+                    }}
+                  />
+                )}
+
+                <div>
+                  <strong>
+                    {token.quote.symbol || "Unknown"}
+                  </strong>
+
+                  <div className="small">
+                    {token.quote.name || ""}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SOCIALS */}
+
+          {(token.socials.website ||
+            token.socials.twitter ||
+            token.socials.telegram) && (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 20,
+                flexWrap: "wrap"
+              }}
+            >
+              {token.socials.website && (
+                <a
+                  className="btn btn-secondary"
+                  href={token.socials.website}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Website
+                </a>
+              )}
+
+              {token.socials.twitter && (
+                <a
+                  className="btn btn-secondary"
+                  href={token.socials.twitter}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  X
+                </a>
+              )}
+
+              {token.socials.telegram && (
+                <a
+                  className="btn btn-secondary"
+                  href={token.socials.telegram}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Telegram
+                </a>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* MARKET STATS */}
+
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: 12,
+            marginTop: 16
+          }}
+        >
+          <Stat
+            label="PRICE"
+            value={price(token.market.priceUsd)}
+          />
+
+          <Stat
+            label="MARKET CAP"
+            value={money(token.market.marketCapUsd)}
+          />
+
+          <Stat
+            label="24H VOLUME"
+            value={money(token.market.volume24hUsd)}
+          />
+
+          <Stat
+            label="24H CHANGE"
+            value={
+              change === null
+                ? "—"
+                : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`
+            }
+          />
+
+          <Stat
+            label="LIQUIDITY"
+            value={money(token.market.liquidityUsd)}
+          />
+
+          <Stat
+            label="PEAK MARKET CAP"
+            value={money(token.market.peakMarketCapUsd)}
+          />
+        </section>
+
+        {/* CHART + TRADE */}
+
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "minmax(0, 2fr) minmax(300px, 1fr)",
+            gap: 16,
+            marginTop: 16
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              minHeight: 470,
+              padding: 22
+            }}
+          >
+            <div className="badge">
+              LIVE CHART
+            </div>
+
+            <h2>
+              {token.symbol} /{" "}
+              {token.quote.symbol || "PAIR"}
+            </h2>
+
+            <TokenChart mint={mint} />
+          </div>
+
+          <div
+            className="card"
+            style={{ padding: 22 }}
+          >
+            <div className="badge">
+              TRADE
+            </div>
+
+            <h2>Buy / Sell</h2>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginBottom: 16
+              }}
+            >
+              <button
+                className="btn btn-primary"
+                type="button"
+                style={{ flex: 1 }}
+              >
+                Buy
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                type="button"
+                style={{ flex: 1 }}
+              >
+                Sell
+              </button>
+            </div>
+
+            <label className="label">
+              Amount
+            </label>
+
+            <input
+              className="input"
+              placeholder="0.00"
+              disabled
+            />
+
+            <p
+              className="small"
+              style={{ marginTop: 14 }}
+            >
+              Trading will be enabled after the
+              StonkFun/Raydium swap route is connected.
+            </p>
+
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled
+              style={{
+                width: "100%",
+                marginTop: 12
+              }}
+            >
+              Trading coming next
+            </button>
+          </div>
+        </section>
+
+        {/* GRADUATION */}
+
+        <section
+          className="card"
+          style={{
+            marginTop: 16,
+            padding: 22
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap"
+            }}
+          >
+            <div>
+              <div className="small">
+                BONDING / GRADUATION
+              </div>
+
+              <h2 style={{ marginBottom: 4 }}>
+                {graduated
+                  ? "Token graduated"
+                  : `${graduationPercent.toFixed(2)}% complete`}
+              </h2>
+            </div>
+
+            {token.graduation.targetMarketCapUsd !==
+              null && (
+              <div
+                style={{
+                  textAlign: "right"
+                }}
+              >
+                <div className="small">
+                  GRADUATION TARGET
+                </div>
+
+                <strong>
+                  {money(
+                    token.graduation
+                      .targetMarketCapUsd
+                  )}
+                </strong>
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              width: "100%",
+              height: 14,
+              borderRadius: 999,
+              background:
+                "rgba(255,255,255,0.08)",
+              overflow: "hidden",
+              marginTop: 16
+            }}
+          >
+            <div
+              style={{
+                width: `${graduationPercent}%`,
+                height: "100%",
+                background:
+                  "linear-gradient(90deg,#5ddcff,#bfeaff)",
+                borderRadius: 999
+              }}
+            />
+          </div>
+        </section>
+
+        {/* TOKEN INFORMATION */}
+
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit,minmax(280px,1fr))",
+            gap: 16,
+            marginTop: 16
+          }}
+        >
+          <div
+            className="card"
+            style={{ padding: 22 }}
+          >
+            <div className="badge">
+              TOKEN INFORMATION
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <div className="small">MINT</div>
+              <div
+                style={{
+                  wordBreak: "break-all",
+                  marginTop: 4
+                }}
+              >
+                {token.mint}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">CREATOR</div>
+              <div
+                style={{
+                  wordBreak: "break-all",
+                  marginTop: 4
+                }}
+              >
+                {token.creator || "—"}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">POOL</div>
+              <div
+                style={{
+                  wordBreak: "break-all",
+                  marginTop: 4
+                }}
+              >
+                {token.pool || "—"}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">
+                LAUNCHPAD
+              </div>
+
+              <strong>
+                {token.launchpad || "—"}
+              </strong>
+            </div>
+          </div>
+
+          <div
+            className="card"
+            style={{ padding: 22 }}
+          >
+            <div className="badge">
+              REWARDS
+            </div>
+
+            <h2 style={{ marginTop: 18 }}>
+              {token.rewards.enabled
+                ? "Rewards enabled"
+                : "Standard launch"}
+            </h2>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">
+                REWARD PAIR
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginTop: 8
+                }}
+              >
+                {token.quote.logoUrl && (
+                  <img
+                    src={token.quote.logoUrl}
+                    alt=""
+                    width={34}
+                    height={34}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%"
+                    }}
+                  />
+                )}
+
+                <strong>
+                  {token.quote.symbol || "—"}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">
+                REWARD TAX
+              </div>
+
+              <strong>
+                {token.rewards.transferTaxBps !==
+                null
+                  ? `${(
+                      token.rewards
+                        .transferTaxBps / 100
+                    ).toFixed(0)}%`
+                  : "—"}
+              </strong>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="small">
+                CREATED
+              </div>
+
+              <strong>
+                {token.createdAt
+                  ? new Date(
+                      token.createdAt
+                    ).toLocaleString()
+                  : "—"}
+              </strong>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+

@@ -1,4 +1,4 @@
-import Image from "next/image";
+﻿import Image from "next/image";
 import { CONFIG } from "../../lib/config";
 
 const networkLabel = CONFIG.network === "mainnet-beta" ? "Mainnet beta" : "Solana devnet";
@@ -6,24 +6,24 @@ const networkLabel = CONFIG.network === "mainnet-beta" ? "Mainnet beta" : "Solan
 export default function DocsPage() {
   return <main className="eb-shell">
     <nav className="eb-nav">
-      <a className="eb-brand" href="/"><Image src="/early-bird-logo.jpeg" alt="EARLY BIRD" width={42} height={42}/><span>EARLY BIRD</span></a>
+      <a className="eb-brand" href="/"><Image src="/midcurve-logo.jpg" alt="MIDCURVE" width={42} height={42}/><span>MIDCURVE</span></a>
       <a className="btn btn-secondary" href="/">Back to launch</a>
     </nav>
     <div className="eb-container">
       <section className="card" style={{maxWidth:900, margin:"0 auto"}}>
         <span className="badge">Technical documentation</span>
-        <h1 style={{fontSize:"clamp(38px, 6vw, 60px)", margin:"16px 0"}}>EARLY BIRD status</h1>
+        <h1 style={{fontSize:"clamp(38px, 6vw, 60px)", margin:"16px 0"}}>MIDCURVE status</h1>
         <p className="small">Implementation details, safeguards, and the path to a broader launch experience.</p>
 
         <h2 style={{marginTop:32}}>Current network status</h2>
         <p>The application is currently configured for <strong>{networkLabel}</strong>. The live token action creates a real SPL mint, associated token account, and initial token supply through the connected wallet. Mainnet launch-adapter requests remain blocked unless the network configuration is explicitly set to mainnet beta.</p>
 
         <h2 style={{marginTop:28}}>Configured platform fee</h2>
-        <p>The configured platform fee is <strong>{CONFIG.platformFeeBps} basis points (0.05%)</strong>. No fee is collected by the current SPL token-creation transaction because EARLY BIRD does not yet have a trading program. Any future fee must be enforced in the on-chain trade layer before mainnet enablement.</p>
+        <p>The configured platform fee is <strong>{CONFIG.platformFeeBps} basis points (0.05%)</strong>. No fee is collected by the current SPL token-creation transaction because MIDCURVE does not yet have a trading program. Any future fee must be enforced in the on-chain trade layer before mainnet enablement.</p>
 
         <h2 style={{marginTop:28}}>Phase 2 launch configuration</h2>
         <p>The launch form records a quote amount, developer buy amount, creator tax (exactly 1%, 2%, or 3%), and whether the creator elects to donate creator fees. When donation is enabled, the creator fee-recipient wallet defaults to the creator&apos;s connected wallet, may be replaced with another Solana public address, and is validated as a public key. The creator signs this exact configuration before token creation; the signed configuration is retained with the prototype&apos;s local metadata and is not an editable post-launch setting.</p>
-        <p>Creator tax and the EARLY BIRD platform fee are separate concepts. The creator tax is a future creator-directed buy/sell charge (1–3%) that can be designated for donation, while the EARLY BIRD platform fee remains a fixed 5 bps / 0.05% protocol fee directed to the configured development wallet. Neither fee is collected by the current Devnet SPL token-creation flow; real fee enforcement belongs in the future on-chain trading and bonding-curve layer.</p>
+        <p>Creator tax and the MIDCURVE platform fee are separate concepts. The creator tax is a future creator-directed buy/sell charge (1â€“3%) that can be designated for donation, while the MIDCURVE platform fee remains a fixed 5 bps / 0.05% protocol fee directed to the configured development wallet. Neither fee is collected by the current Devnet SPL token-creation flow; real fee enforcement belongs in the future on-chain trading and bonding-curve layer.</p>
 
         <h2 style={{marginTop:28}}>Pricing and trading boundary</h2>
         <p>Quote and dev-buy values are launch inputs, not a price oracle. The code includes a typed boundary for a future bonding-curve quote provider, but currently returns no estimated token amount and is explicitly non-executable. There are no buy/sell transactions, chart, market cap, volume, liquidity, price, or token-price claims in this phase.</p>
@@ -56,3 +56,4 @@ export default function DocsPage() {
     </div>
   </main>;
 }
+
