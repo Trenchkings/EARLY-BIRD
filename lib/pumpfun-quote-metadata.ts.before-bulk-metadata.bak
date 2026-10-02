@@ -1,0 +1,154 @@
+import {
+  mplTokenMetadata,
+  safeFetchMetadataFromSeeds
+} from "@metaplex-foundation/mpl-token-metadata";
+import {
+  createUmi
+} from "@metaplex-foundation/umi-bundle-defaults";
+
+import {
+  publicKey
+} from "@metaplex-foundation/umi";
+
+export type PumpQuoteMetadata = {
+  name: string;
+  symbol: string;
+  logoUrl?: string;
+};
+
+type OffchainMetadata = {
+  name?: string;
+  symbol?: string;
+  image?: string;
+};
+
+const metadataCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    value: PumpQuoteMetadata | null;
+  }
+>();
+
+const METADATA_CACHE_MS = 60 * 60 * 1000;
+
+function normalizeUri(uri: string): string {
+  const value = uri.replace(/\0/g, "").trim();
+
+  if (value.startsWith("ipfs://")) {
+    return `https://gateway.pinata.cloud/ipfs/${value.slice(7)}`;
+  }
+
+  return value;
+}
+
+async function fetchOffchainMetadata(
+  uri: string
+): Promise<OffchainMetadata | null> {
+  const url = normalizeUri(uri);
+
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json() as OffchainMetadata;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolvePumpQuoteMetadata(
+  rpcUrl: string,
+  mint: string
+): Promise<PumpQuoteMetadata | null> {
+  const cached = metadataCache.get(mint);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  try {
+    const umi = createUmi(rpcUrl).use(
+      mplTokenMetadata()
+    );
+
+    const metadata =
+      await safeFetchMetadataFromSeeds(
+        umi,
+        {
+          mint: publicKey(mint)
+        }
+      );
+
+    if (!metadata) {
+      metadataCache.set(mint, {
+        value: null,
+        expiresAt: Date.now() + METADATA_CACHE_MS
+      });
+
+      return null;
+    }
+
+    const onchainName =
+      metadata.name.replace(/\0/g, "").trim();
+
+    const onchainSymbol =
+      metadata.symbol.replace(/\0/g, "").trim();
+
+    const metadataUri =
+      metadata.uri.replace(/\0/g, "").trim();
+
+    const offchain =
+      metadataUri
+        ? await fetchOffchainMetadata(metadataUri)
+        : null;
+
+    const result: PumpQuoteMetadata = {
+      name:
+        offchain?.name?.trim() ||
+        onchainName ||
+        "Pump.fun supported quote",
+
+      symbol:
+        offchain?.symbol?.trim() ||
+        onchainSymbol ||
+        `${mint.slice(0, 4)}...${mint.slice(-4)}`,
+
+      ...(offchain?.image
+        ? {
+            logoUrl: normalizeUri(
+              offchain.image
+            )
+          }
+        : {})
+    };
+
+    metadataCache.set(mint, {
+      value: result,
+      expiresAt: Date.now() + METADATA_CACHE_MS
+    });
+
+    return result;
+  } catch (error) {
+    console.warn(
+      `Unable to resolve Pump quote metadata for ${mint}:`,
+      error
+    );
+
+    metadataCache.set(mint, {
+      value: null,
+      expiresAt: Date.now() + 5 * 60 * 1000
+    });
+
+    return null;
+  }
+}

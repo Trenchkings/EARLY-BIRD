@@ -1,3 +1,6 @@
 node_modules/
 .next/
 tsconfig.tsbuildinfo
+
+# Local secrets
+.env.local

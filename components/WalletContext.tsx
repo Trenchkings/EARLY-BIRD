@@ -11,7 +11,10 @@ import { CONFIG } from "../lib/config";
 
 export function WalletContext({ children }: { children: React.ReactNode }) {
   const endpoint = useMemo(
-    () => process.env.NEXT_PUBLIC_SOLANA_RPC || clusterApiUrl(CONFIG.network),
+    () =>
+      typeof window !== "undefined"
+        ? `${window.location.origin}/api/solana-rpc`
+        : "http://localhost:3000/api/solana-rpc",
     []
   );
 

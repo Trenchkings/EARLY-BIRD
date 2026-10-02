@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -349,17 +349,25 @@ export default function MarketSections() {
       )
       .slice(0, 8);
 
+    const MIDCURVE_MARKET_CAP_USD = 32_000;
+
     const aboutToGraduate = [...usable]
       .filter(
         token =>
           token.status !== "graduated" &&
-          (token.graduationProgress ?? 0) > 0
+          (token.marketCapUsd ?? 0) >= MIDCURVE_MARKET_CAP_USD
       )
-      .sort(
-        (a, b) =>
+      .sort((a, b) => {
+        const progressDifference =
           (b.graduationProgress ?? 0) -
-          (a.graduationProgress ?? 0)
-      )
+          (a.graduationProgress ?? 0);
+
+        if (progressDifference !== 0) {
+          return progressDifference;
+        }
+
+        return (b.marketCapUsd ?? 0) - (a.marketCapUsd ?? 0);
+      })
       .slice(0, 8);
 
     const graduated = [...usable]
@@ -417,9 +425,9 @@ export default function MarketSections() {
     },
     {
       key: "aboutToGraduate" as const,
-      label: "🚀 Graduating",
-      title: "🚀 ABOUT TO GRADUATE",
-      subtitle: "Tokens furthest along their graduation curve.",
+      label: "🚀 MIDCURVE",
+      title: "🚀 MIDCURVE",
+      subtitle: "Tokens approaching graduation around the $32K+ market-cap range.",
       tokens: sections.aboutToGraduate
     },
     {

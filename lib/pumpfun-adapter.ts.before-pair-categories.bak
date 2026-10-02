@@ -1,0 +1,148 @@
+﻿import { PublicKey } from "@solana/web3.js";
+
+export const PUMP_PROGRAM_ID =
+  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+
+export const WRAPPED_SOL_MINT =
+  "So11111111111111111111111111111111111111112";
+
+export const USDC_MINT =
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+export type PumpPair = {
+  mint: string;
+  symbol: string;
+  name: string;
+  category: "native" | "stable" | "custom";
+  launchable: boolean;
+};
+
+export class PumpFunError extends Error {
+  constructor(message: string, readonly status = 502) {
+    super(message);
+    this.name = "PumpFunError";
+  }
+}
+
+export function assertPublicKey(
+  value: unknown,
+  label: string
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new PumpFunError(`${label} is required.`, 400);
+  }
+
+  try {
+    return new PublicKey(value.trim()).toBase58();
+  } catch {
+    throw new PumpFunError(
+      `${label} must be a valid Solana public key.`,
+      400
+    );
+  }
+}
+
+export function getPairs(): PumpPair[] {
+  return [
+    {
+      mint: WRAPPED_SOL_MINT,
+      symbol: "SOL",
+      name: "Solana",
+      category: "native",
+      launchable: true
+    },
+    {
+      mint: USDC_MINT,
+      symbol: "USDC",
+      name: "USD Coin",
+      category: "stable",
+      launchable: true
+    },
+
+    // Pump.fun supported tokenised equities / ETFs
+    {
+      mint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      symbol: "APPLX",
+      name: "Apple",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      symbol: "TSLAX",
+      name: "Tesla",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      symbol: "NVDAX",
+      name: "NVIDIA",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+      symbol: "GOOGLX",
+      name: "Alphabet",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+      symbol: "AMZNX",
+      name: "Amazon",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+      symbol: "MSFTX",
+      name: "Microsoft",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+      symbol: "COINX",
+      name: "Coinbase",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+      symbol: "HOODX",
+      name: "Robinhood",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      symbol: "SPYX",
+      name: "SPDR S&P 500",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      symbol: "QQQX",
+      name: "Invesco QQQ",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+      symbol: "MSTRX",
+      name: "Strategy (MicroStrategy)",
+      category: "custom",
+      launchable: true
+    },
+    {
+      mint: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+      symbol: "METAX",
+      name: "Meta",
+      category: "custom",
+      launchable: true
+    }
+  ];
+}

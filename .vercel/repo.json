@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_kbcTnUfGKrUUfgZQVMg4TEJaxeTz",
+      "name": "early-bird",
+      "directory": ".",
+      "orgId": "team_RTS6gYbntgtsiCZkBxrQ8iDN"
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+﻿import { NextResponse } from "next/server";
+import {
+  getPairs,
+  prepareLaunch,
+  StonkFunError,
+  StonkFunLaunchRequest,
+  assertPublicKey
+} from "../../../../lib/stonkfun-adapter";
+import { validateTokenMetadata } from "../../../../lib/token-metadata";
+
+const preparations = new Map<
+  string,
+  Promise<{
+    launchId: string;
+    transaction: string;
+    fundingTransaction?: string;
+  }>
+>();
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json().catch(() => null)) as {
+      requestId?: unknown;
+      launch?: Partial<StonkFunLaunchRequest>;
+      metadata?: unknown;
+    } | null;
+
+    if (
+      !body ||
+      typeof body.requestId !== "string" ||
+      !body.requestId ||
+      !body.launch
+    ) {
+      throw new StonkFunError(
+        "A launch and request ID are required.",
+        400
+      );
+    }
+
+    const publicKey = assertPublicKey(
+      body.launch.publicKey,
+      "Creator wallet"
+    );
+
+    // StonkFun SOL LaunchLab pair.
+    // Standard mode sends no quoteMint, so default to SOL.
+    const SOL_QUOTE_MINT =
+      "So11111111111111111111111111111111111111112";
+
+    const requestedQuoteMint =
+      typeof body.launch.quoteMint === "string"
+        ? body.launch.quoteMint.trim()
+        : "";
+
+    const quoteMint = assertPublicKey(
+      requestedQuoteMint || SOL_QUOTE_MINT,
+      "Quote mint"
+    );
+
+    const metadataError = validateTokenMetadata(
+      body.metadata as Record<string, unknown>
+    );
+
+    if (metadataError) {
+      throw new StonkFunError(metadataError, 400);
+    }
+
+    const pairs = await getPairs();
+
+    if (!pairs.some((pair) => pair.mint === quoteMint)) {
+      throw new StonkFunError(
+        "Select a currently launchable StonkFun quote pair.",
+        400
+      );
+    }
+
+    const logo =
+      typeof body.launch.logo === "string"
+        ? body.launch.logo.trim()
+        : "";
+
+    if (!logo) {
+      throw new StonkFunError(
+        "A token logo is required.",
+        400
+      );
+    }
+
+    if (!logo.startsWith("data:image/")) {
+      throw new StonkFunError(
+        "Token logo must be supplied as an image data URL.",
+        400
+      );
+    }
+
+    const launch: StonkFunLaunchRequest = {
+      publicKey,
+      quoteMint,
+      name: String(body.launch.name || "").trim(),
+      symbol: String(body.launch.symbol || "")
+        .trim()
+        .toUpperCase(),
+      description: String(
+        body.launch.description || ""
+      ).trim(),
+      devBuyAmount: String(
+        body.launch.devBuyAmount || "0"
+      ),
+      logo,
+      website:
+        typeof body.launch.website === "string"
+          ? body.launch.website
+          : undefined,
+      twitter:
+        typeof body.launch.twitter === "string"
+          ? body.launch.twitter
+          : undefined,
+      telegram:
+        typeof body.launch.telegram === "string"
+          ? body.launch.telegram
+          : undefined
+    };
+
+    const key = `${publicKey}:${body.requestId}`;
+
+    const existing = preparations.get(key);
+
+    if (existing) {
+      return NextResponse.json(await existing);
+    }
+
+    const result = prepareLaunch(launch);
+
+    preparations.set(key, result);
+
+    result.catch(() => {
+      preparations.delete(key);
+    });
+
+    return NextResponse.json(await result);
+  } catch (error) {
+    const status =
+      error instanceof StonkFunError
+        ? error.status
+        : 502;
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to prepare launch."
+      },
+      { status }
+    );
+  }
+}
+

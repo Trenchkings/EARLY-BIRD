@@ -1,0 +1,449 @@
+﻿import { PublicKey } from "@solana/web3.js";
+
+const PAIRS_URL = "https://www.stonkfun.xyz/api/public/v1/pairs";
+const LAUNCHLAB_URL = "https://www.stonkfun.xyz/api/launchlab-launch";
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+export type StonkFunPair = {
+  mint: string;
+  symbol: string;
+  name: string;
+  category: string;
+};
+
+export type StonkFunPairRegistryEntry = Record<string, unknown> & {
+  mint: string;
+};
+
+export type StonkFunLaunchRequest = {
+  publicKey: string;
+  quoteMint: string;
+  name: string;
+  symbol: string;
+  description: string;
+  devBuyAmount: string;
+  logo: string;
+  website?: string;
+  twitter?: string;
+  telegram?: string;
+  mode?: "reward";
+  rewardTaxBps?: number;
+  creatorTaxBps?: number;
+};
+
+export type PreparedLaunch = {
+  launchId: string;
+  transaction: string;
+  fundingTransaction?: string;
+};
+
+export type SubmittedLaunch = {
+  launchId: string;
+  signature: string;
+  mint?: string;
+  pool?: string;
+};
+
+export type LaunchStatus = {
+  state: "pending" | "confirmed" | "failed";
+  signature?: string;
+  mint?: string;
+  error?: string;
+};
+
+export class StonkFunError extends Error {
+  constructor(message: string, readonly status = 502) {
+    super(message);
+    this.name = "StonkFunError";
+  }
+}
+
+export function assertMainnetAdapter() {
+  if (
+    (process.env.NEXT_PUBLIC_SOLANA_NETWORK || "devnet") !==
+    "mainnet-beta"
+  ) {
+    throw new StonkFunError(
+      "StonkFun launches are available on mainnet only.",
+      409
+    );
+  }
+}
+
+export function assertPublicKey(
+  value: unknown,
+  label: string
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new StonkFunError(`${label} is required.`, 400);
+  }
+
+  try {
+    return new PublicKey(value.trim()).toBase58();
+  } catch {
+    throw new StonkFunError(
+      `${label} must be a valid Solana public key.`,
+      400
+    );
+  }
+}
+
+async function providerFetch(
+  url: string,
+  init?: RequestInit
+): Promise<unknown> {
+  const controller = new AbortController();
+
+  const configured = Number(process.env.STONKFUN_TIMEOUT_MS);
+
+  const timeout =
+    Number.isFinite(configured) && configured > 0
+      ? configured
+      : DEFAULT_TIMEOUT_MS;
+
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const providerMessage =
+        data &&
+        typeof data === "object" &&
+        "error" in data &&
+        typeof (data as { error?: unknown }).error === "string"
+          ? (data as { error: string }).error
+          : "StonkFun rejected the request.";
+
+      throw new StonkFunError(
+        providerMessage,
+        response.status >= 400 && response.status < 600
+          ? response.status
+          : 502
+      );
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof StonkFunError) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new StonkFunError(
+        "StonkFun did not respond in time.",
+        504
+      );
+    }
+
+    throw new StonkFunError(
+      "StonkFun is temporarily unavailable.",
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function record(
+  value: unknown
+): Record<string, unknown> | null {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function pairRows(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const body = record(payload);
+
+  if (!body) {
+    return [];
+  }
+
+  if (Array.isArray(body.pairs)) {
+    return body.pairs;
+  }
+
+  const data = record(body.data);
+
+  if (data && Array.isArray(data.pairs)) {
+    return data.pairs;
+  }
+
+  if (Array.isArray(body.data)) {
+    return body.data;
+  }
+
+  return [];
+}
+
+export async function getPairs(): Promise<StonkFunPair[]> {
+  const payload = await providerFetch(PAIRS_URL);
+  const rows = pairRows(payload);
+
+  return rows.flatMap(
+    (value): StonkFunPair[] => {
+      const pair = record(value);
+
+      if (
+        !pair ||
+        pair.launchable === false ||
+        pair.launchLabReady === false
+      ) {
+        return [];
+      }
+
+      try {
+        const mint = assertPublicKey(
+          pair.mint,
+          "Quote mint"
+        );
+
+        if (
+          typeof pair.symbol !== "string" ||
+          !pair.symbol.trim()
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            mint,
+            symbol: pair.symbol.trim(),
+            name:
+              typeof pair.name === "string" &&
+              pair.name.trim()
+                ? pair.name.trim()
+                : pair.symbol.trim(),
+            category:
+              typeof pair.category === "string" &&
+              pair.category.trim()
+                ? pair.category.trim()
+                : "Other"
+          }
+        ];
+      } catch {
+        return [];
+      }
+    }
+  );
+}
+
+export async function getPairRegistryEntry(
+  quoteMint: string
+): Promise<StonkFunPairRegistryEntry | null> {
+  const payload = await providerFetch(PAIRS_URL);
+  const rows = pairRows(payload);
+
+  for (const value of rows) {
+    const pair = record(value);
+
+    if (
+      !pair ||
+      pair.launchable === false ||
+      pair.launchLabReady === false
+    ) {
+      continue;
+    }
+
+    try {
+      if (
+        assertPublicKey(pair.mint, "Quote mint") ===
+        quoteMint
+      ) {
+        return {
+          ...pair,
+          mint: quoteMint
+        };
+      }
+    } catch {
+      // Ignore malformed registry entries.
+    }
+  }
+
+  return null;
+}
+
+export async function prepareLaunch(
+  request: StonkFunLaunchRequest
+): Promise<PreparedLaunch> {
+  assertMainnetAdapter();
+
+  const body = {
+    action: "prepare",
+    creatorWallet: assertPublicKey(
+      request.publicKey,
+      "Creator wallet"
+    ),
+    quoteMint: assertPublicKey(
+      request.quoteMint,
+      "Quote mint"
+    ),
+    name: request.name.trim(),
+    symbol: request.symbol.trim().toUpperCase(),
+    logo: request.logo,
+    ...(request.mode === "reward" &&
+    typeof request.rewardTaxBps === "number"
+      ? {
+          mode: "reward",
+          rewardTaxBps: request.rewardTaxBps
+        }
+      : {}),
+    ...(request.devBuyAmount &&
+    Number(request.devBuyAmount) > 0
+      ? {
+          devBuySol: Number(request.devBuyAmount)
+        }
+      : {}),
+    ...(request.website
+      ? { website: request.website }
+      : {}),
+    ...(request.twitter
+      ? { twitter: request.twitter }
+      : {}),
+    ...(request.telegram
+      ? { telegram: request.telegram }
+      : {})
+  };
+
+  const data = record(
+    await providerFetch(LAUNCHLAB_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    })
+  );
+
+  if (
+    !data ||
+    typeof data.transaction !== "string" ||
+    !data.transaction
+  ) {
+    throw new StonkFunError(
+      "StonkFun returned an invalid prepared transaction."
+    );
+  }
+
+  const mint =
+    typeof data.mint === "string"
+      ? data.mint
+      : "";
+
+  const fundingTransaction =
+    typeof data.fundingTransaction === "string" &&
+    data.fundingTransaction
+      ? data.fundingTransaction
+      : undefined;
+
+  return {
+    launchId: mint || request.quoteMint,
+    transaction: data.transaction,
+    ...(fundingTransaction
+      ? { fundingTransaction }
+      : {})
+  };
+}
+
+export async function submitLaunch(
+  launchId: string,
+  transaction: string,
+  fundingTransaction?: string
+): Promise<SubmittedLaunch> {
+  assertMainnetAdapter();
+
+  const data = record(
+    await providerFetch(LAUNCHLAB_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "submit",
+        signedTransaction: transaction,
+        ...(fundingTransaction
+          ? {
+              signedFundingTransaction: fundingTransaction
+            }
+          : {})
+      })
+    })
+  );
+
+  if (!data) {
+    throw new StonkFunError(
+      "StonkFun returned an invalid submission response."
+    );
+  }
+
+  const signature =
+    typeof data.signature === "string"
+      ? data.signature
+      : typeof data.txSignature === "string"
+        ? data.txSignature
+        : "";
+
+  if (!signature) {
+    throw new StonkFunError(
+      "StonkFun did not return a transaction signature."
+    );
+  }
+
+  const mint =
+    typeof data.mint === "string" && data.mint
+      ? data.mint
+      : undefined;
+
+  const pool =
+    typeof data.pool === "string" && data.pool
+      ? data.pool
+      : undefined;
+
+  return {
+    launchId,
+    signature,
+    ...(mint ? { mint } : {}),
+    ...(pool ? { pool } : {})
+  };
+}
+
+export async function getLaunchStatus(
+  launchId: string
+): Promise<LaunchStatus> {
+  assertMainnetAdapter();
+
+  /*
+   * The LaunchLab endpoint does not expose the old
+   * launchId/status API used by the original adapter.
+   * Submission itself is therefore treated as the
+   * authoritative provider response.
+   */
+  return {
+    state: "pending"
+  };
+}
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,259 @@
+﻿import { NextResponse } from "next/server";
+import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  getMint,
+  getTokenMetadata
+} from "@solana/spl-token";
+import { OnlinePumpSdk } from "@pump-fun/pump-sdk";
+
+import { CONFIG } from "../../../../lib/config";
+import {
+  getPairs,
+  PumpFunError,
+  WRAPPED_SOL_MINT,
+  USDC_MINT
+} from "../../../../lib/pumpfun-adapter";
+
+export const dynamic = "force-dynamic";
+
+type ApiPair = {
+  mint: string;
+  symbol: string;
+  name: string;
+  category: "native" | "stable" | "custom";
+  launchable: boolean;
+};
+
+type CachedPairs = {
+  expiresAt: number;
+  pairs: ApiPair[];
+};
+
+let cache: CachedPairs | null = null;
+
+const CACHE_MS = 15 * 60 * 1000;
+
+/*
+ * Limit simultaneous RPC metadata requests.
+ * This is deliberately conservative because requesting metadata
+ * for every Pump quote mint at once can trigger RPC 429 responses.
+ */
+const METADATA_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  limit: number,
+  worker: (value: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex++;
+
+      if (index >= values.length) {
+        return;
+      }
+
+      results[index] = await worker(values[index]);
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(limit, values.length) },
+      () => runWorker()
+    )
+  );
+
+  return results;
+}
+
+export async function GET() {
+  try {
+    if (cache && cache.expiresAt > Date.now()) {
+      return NextResponse.json({
+        pairs: cache.pairs,
+        cached: true
+      });
+    }
+
+    const connection = new Connection(
+      CONFIG.rpc,
+      "confirmed"
+    );
+
+    const onlinePump = new OnlinePumpSdk(connection);
+
+    /*
+     * Pump.fun remains the authority for which quote mints
+     * EARLY BIRD is allowed to display.
+     */
+    const supported =
+      await onlinePump.fetchSupportedQuoteMints();
+
+    /*
+     * Preserve our existing human-readable labels where we
+     * already have them.
+     */
+    const knownPairs = new Map(
+      getPairs().map(pair => [pair.mint, pair])
+    );
+
+    const pairs = await mapWithConcurrency(
+      supported,
+      METADATA_CONCURRENCY,
+      async supportedPair => {
+        const mint = supportedPair.mint.toBase58();
+
+        const known = knownPairs.get(mint);
+
+        if (known) {
+          return known;
+        }
+
+        /*
+         * Explicit fallbacks for the two core quote assets.
+         */
+        if (mint === WRAPPED_SOL_MINT) {
+          return {
+            mint,
+            symbol: "SOL",
+            name: "Solana",
+            category: "native" as const,
+            launchable: true
+          };
+        }
+
+        if (mint === USDC_MINT) {
+          return {
+            mint,
+            symbol: "USDC",
+            name: "USD Coin",
+            category: "stable" as const,
+            launchable: true
+          };
+        }
+
+        try {
+          const publicKey = new PublicKey(mint);
+
+          const accountInfo =
+            await connection.getAccountInfo(publicKey);
+
+          if (accountInfo) {
+            /*
+             * getMint works for both legacy SPL Token and
+             * Token-2022 when supplied with the actual owner.
+             */
+            await getMint(
+              connection,
+              publicKey,
+              "confirmed",
+              accountInfo.owner
+            );
+
+            /*
+             * Token-2022 metadata is available directly for
+             * many of Pump.fun's supported quote assets.
+             */
+            const metadata = await getTokenMetadata(
+              connection,
+              publicKey,
+              "confirmed",
+              accountInfo.owner
+            );
+
+            if (metadata) {
+              const symbol =
+                metadata.symbol?.trim() || "TOKEN";
+
+              const name =
+                metadata.name?.trim() || symbol;
+
+              return {
+                mint,
+                symbol,
+                name,
+                category: "custom" as const,
+                launchable: true
+              };
+            }
+          }
+        } catch (error) {
+          /*
+           * Metadata failure must not make a Pump-supported
+           * quote mint unlaunchable.
+           */
+          console.warn(
+            `Unable to resolve Pump quote metadata for ${mint}:`,
+            error instanceof Error
+              ? error.message
+              : error
+          );
+        }
+
+        /*
+         * Pump has explicitly reported this mint as supported,
+         * but no readable metadata was available through the
+         * SPL metadata path.
+         *
+         * Keep it selectable rather than silently deleting it.
+         */
+        return {
+          mint,
+          symbol: `${mint.slice(0, 4)}…${mint.slice(-4)}`,
+          name: "Pump.fun supported quote",
+          category: "custom" as const,
+          launchable: true
+        };
+      }
+    );
+
+    /*
+     * Make the selector easier to use:
+     * SOL first, USDC second, then alphabetical.
+     */
+    pairs.sort((a, b) => {
+      if (a.mint === WRAPPED_SOL_MINT) return -1;
+      if (b.mint === WRAPPED_SOL_MINT) return 1;
+
+      if (a.mint === USDC_MINT) return -1;
+      if (b.mint === USDC_MINT) return 1;
+
+      return a.symbol.localeCompare(b.symbol);
+    });
+
+    cache = {
+      pairs,
+      expiresAt: Date.now() + CACHE_MS
+    };
+
+    return NextResponse.json({
+      pairs,
+      cached: false,
+      supportedCount: supported.length
+    });
+  } catch (error) {
+    console.error(
+      "PUMPFUN PAIRS ERROR:",
+      error
+    );
+
+    const status =
+      error instanceof PumpFunError
+        ? error.status
+        : 502;
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to load Pump.fun pairs."
+      },
+      { status }
+    );
+  }
+}

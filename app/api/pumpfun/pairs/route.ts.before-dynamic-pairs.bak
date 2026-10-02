@@ -1,0 +1,61 @@
+﻿import { NextResponse } from "next/server";
+import { Connection } from "@solana/web3.js";
+import { OnlinePumpSdk } from "@pump-fun/pump-sdk";
+
+import { CONFIG } from "../../../../lib/config";
+import {
+  getPairs,
+  PumpFunError
+} from "../../../../lib/pumpfun-adapter";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    const connection = new Connection(CONFIG.rpc, "confirmed");
+    const onlinePump = new OnlinePumpSdk(connection);
+
+    /*
+     * Ask Pump.fun's current on-chain configuration which quote
+     * mints are actually accepted by create_v2.
+     */
+    const supported =
+      await onlinePump.fetchSupportedQuoteMints();
+
+    const supportedMints = new Set(
+      supported.map(pair => pair.mint.toBase58())
+    );
+
+    /*
+     * Keep EARLY BIRD's labels/names, but only expose pairs
+     * currently reported as supported by Pump.fun.
+     */
+    const pairs = getPairs().filter(pair =>
+      supportedMints.has(pair.mint)
+    );
+
+    return NextResponse.json({
+      pairs
+    });
+  } catch (error) {
+    console.error(
+      "PUMPFUN PAIRS ERROR:",
+      error
+    );
+
+    const status =
+      error instanceof PumpFunError
+        ? error.status
+        : 502;
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to load Pump.fun pairs."
+      },
+      { status }
+    );
+  }
+}

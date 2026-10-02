@@ -13,8 +13,9 @@ export type PumpPair = {
   mint: string;
   symbol: string;
   name: string;
-  category: "native" | "stable" | "custom";
+  category: "native" | "stable" | "crypto" | "stock" | "etf" | "custom";
   launchable: boolean;
+  logoUrl?: string;
 };
 
 export class PumpFunError extends Error {
@@ -49,13 +50,101 @@ export function getPairs(): PumpPair[] {
       symbol: "SOL",
       name: "Solana",
       category: "native",
-      launchable: true
+      launchable: true,
+      logoUrl: "/pair-logos/sol.svg"
     },
     {
       mint: USDC_MINT,
       symbol: "USDC",
       name: "USD Coin",
       category: "stable",
+      launchable: true,
+      logoUrl: "/pair-logos/usdc.svg"
+    },
+
+    // Pump.fun supported tokenised equities / ETFs
+    {
+      mint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      symbol: "APPLX",
+      name: "Apple",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      symbol: "TSLAX",
+      name: "Tesla",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+      symbol: "NVDAX",
+      name: "NVIDIA",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+      symbol: "GOOGLX",
+      name: "Alphabet",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+      symbol: "AMZNX",
+      name: "Amazon",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+      symbol: "MSFTX",
+      name: "Microsoft",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+      symbol: "COINX",
+      name: "Coinbase",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+      symbol: "HOODX",
+      name: "Robinhood",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+      symbol: "SPYX",
+      name: "SPDR S&P 500",
+      category: "etf",
+      launchable: true
+    },
+    {
+      mint: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+      symbol: "QQQX",
+      name: "Invesco QQQ",
+      category: "etf",
+      launchable: true
+    },
+    {
+      mint: "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+      symbol: "MSTRX",
+      name: "Strategy (MicroStrategy)",
+      category: "stock",
+      launchable: true
+    },
+    {
+      mint: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+      symbol: "METAX",
+      name: "Meta",
+      category: "stock",
       launchable: true
     }
   ];
